@@ -4,6 +4,11 @@ from pathlib import Path
 INPUT_LIMIT=1024*1024
 OUTPUT_LIMIT=2*1024*1024
 class Invalid(ValueError):pass
+class MaskMismatch(Invalid):
+    def __init__(self,frame,mask,row):
+        super().__init__('A declared mask contains nonzero decoded RGB pixels.')
+        self.location={'frame_index':frame,'mask_index':mask,'pixel_row':row}
+
 
 def read(path,limit=INPUT_LIMIT,utf8=True):
     try:
@@ -168,7 +173,7 @@ def verify(folder):
     if canonical(info)!=canonical(receipt['output']) or types!=['video']:raise Invalid('Output metadata/streams differ.')
     plan=load_plan(plan_raw,info)
     if plan['source_sha256']!=receipt['source_sha256'] or receipt['all_audio_removed'] is not True or receipt['manual_review_required'] is not True:raise Invalid('Receipt assertions differ.')
-    return {'consistent':True,'output':info,'output_sha256':receipt['output_sha256'],'manual_review_required':True,'scope':'Hashes and output stream properties only, not source authenticity or completeness/correctness of privacy masking.'}
+    return {'consistent':True,'output':info,'plan_sha256':receipt['plan_sha256'],'output_sha256':receipt['output_sha256'],'manual_review_required':True,'scope':'Hashes and output stream properties only, not source authenticity or completeness/correctness of privacy masking.'}
 
 def frame(folder,index,out):
     result=verify(folder);integer(index,0,result['output']['frames']-1)
@@ -180,3 +185,48 @@ def frame(folder,index,out):
         if not png.startswith(b'\x89PNG\r\n\x1a\n'):raise Invalid('Review frame could not be decoded.')
     root=Path(out);root.mkdir(exist_ok=False);(root/'review-frame.png').write_bytes(png)
     return {'frame':index,'manual_review_required':True}
+
+
+def audit_masks(folder):
+    """Independently inspect every planned output rectangle in decoded RGB frames.
+
+    This does not inspect unmarked regions or authenticate the source/plan.
+    """
+    import threading
+    checked=verify(folder)
+    plan_raw=read(Path(folder)/'plan.json');video_raw=read(Path(folder)/'redacted.mkv',MAX_OUTPUT,utf8=False)
+    if hashlib.sha256(plan_raw).hexdigest()!=checked['plan_sha256'] or hashlib.sha256(video_raw).hexdigest()!=checked['output_sha256']:raise Invalid('Bundle changed after structural verification.')
+    info=checked['output'];plan=load_plan(plan_raw,info);frame_bytes=info['width']*info['height']*3;pixel_checks=0;marked_frames=0
+    with tempfile.TemporaryDirectory(prefix='frame-veil-audit-') as t:
+        p=Path(t)/'verified.mkv';p.write_bytes(video_raw)
+        # One RGB frame at a time, not the full decoded recording in memory.
+        with tempfile.TemporaryFile() as errors:
+            process=None;timer=None;expired=threading.Event()
+            try:
+                process=subprocess.Popen([executable('ffmpeg'),'-hide_banner','-loglevel','error','-nostdin',*input_options('matroska'),'-i',str(p),'-map','0:v:0','-an','-sn','-dn','-threads','1','-fps_mode','passthrough','-frames:v',str(info['frames']+1),'-pix_fmt','rgb24','-f','rawvideo','pipe:1'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=errors)
+                def stop():
+                    expired.set()
+                    try:process.kill()
+                    except OSError:pass
+                timer=threading.Timer(TIMEOUT,stop);timer.daemon=True;timer.start()
+                for index in range(info['frames']):
+                    frame=process.stdout.read(frame_bytes)
+                    if expired.is_set() or len(frame)!=frame_bytes:raise Invalid('Incomplete or timed-out RGB decode.')
+                    masks=[(mi,m) for mi,m in enumerate(plan['masks']) if m['start_frame']<=index<m['end_frame']]
+                    if masks:marked_frames+=1
+                    for mi,m in masks:
+                        for row in range(m['y'],m['y']+m['height']):
+                            start=(row*info['width']+m['x'])*3;segment=frame[start:start+m['width']*3]
+                            if segment.count(0)!=len(segment):raise MaskMismatch(index,mi,row)
+                        pixel_checks+=m['width']*m['height']
+                if process.stdout.read(1):raise Invalid('Unexpected extra decoded frames.')
+                code=process.wait(timeout=2);errors.seek(0)
+                if expired.is_set() or code or errors.read(1):raise Invalid('Decode reported an error or timeout.')
+            except (OSError,subprocess.TimeoutExpired):raise Invalid('Mask audit decoder failed or timed out.') from None
+            finally:
+                if timer is not None:timer.cancel()
+                if process is not None:
+                    if process.poll() is None:
+                        process.kill();process.wait()
+                    if process.stdout is not None:process.stdout.close()
+    return {'declared_masks_opaque':True,'all_audio_absent':True,'decoded_frames':info['frames'],'marked_frames':marked_frames,'rectangle_pixel_checks_including_overlap':pixel_checks,'output_sha256':checked['output_sha256'],'plan_sha256':checked['plan_sha256'],'manual_review_required':True,'scope':'Exact zero RGB checks of declared output rectangles only; unmarked privacy, source authenticity, source-to-output preservation and timing correctness are not certified.'}

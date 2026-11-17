@@ -1,2 +1,2 @@
 """Manual opaque masks for explicitly authorized screen-recording copies."""
-__version__='0.1.0'
+__version__='0.1.1'
