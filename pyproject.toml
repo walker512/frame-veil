@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "frame-veil"
+version = "0.1.0"
+description = "Manual frame-bound opaque video masking"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "walker512"}]
+[project.scripts]
+frame-veil = "frame_veil.__main__:main"
+[tool.setuptools.packages.find]
+include = ["frame_veil*"]
