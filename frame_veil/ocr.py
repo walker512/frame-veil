@@ -218,7 +218,12 @@ def prepare(folder,out):
 
 def plan(source,folder,decision_path,out):
     if Path(out).exists() or Path(out).is_symlink():raise Invalid('Output must be new.')
-    files,m,found=load_scan(folder);dr=core.read(decision_path);d=core.parse(dr);core.fields(d,('schema','scan_manifest_sha256','source_sha256','decisions'));core.integer(d['schema'],1,1)
+    files,m,found=load_scan(folder)
+    return plan_from_evidence(source,files,m,found,decision_path,out)
+
+def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0o777):
+    if Path(out).exists() or Path(out).is_symlink():raise Invalid('Output must be new.')
+    dr=core.read(decision_path);d=core.parse(dr);core.fields(d,('schema','scan_manifest_sha256','source_sha256','decisions'));core.integer(d['schema'],1,1)
     if d['scan_manifest_sha256']!=sha(files['manifest.json']) or d['source_sha256']!=m['source_sha256'] or sha(core.read(source,core.MAX_SOURCE,False))!=m['source_sha256']:raise Invalid('Decisions/source/scan binding mismatch.')
     if type(d['decisions']) is not list or len(d['decisions'])!=len(found):raise Invalid('Every candidate needs an explicit decision.')
     masks=[];info=m['info']
@@ -234,8 +239,8 @@ def plan(source,folder,decision_path,out):
         masks.append(mask)
     if not masks:raise Invalid('No accepted masks; zero candidates/accepts is not a privacy clearance. Use manual workflow.')
     p={'schema':1,'source_sha256':m['source_sha256'],**{k:info[k] for k in ('width','height','frames')},'masks':masks};pr=dump(p);core.load_plan(pr,info)
-    receipt={'schema':1,'source_sha256':m['source_sha256'],'scan_manifest_sha256':sha(files['manifest.json']),'decisions_sha256':sha(dr),'plan_sha256':sha(pr),'scope':SCOPE,'manual_interval_declarations':True}
-    Path(out).mkdir(exist_ok=False)
+    receipt={'schema':1,'source_sha256':m['source_sha256'],'scan_manifest_sha256':sha(files['manifest.json']),'decisions_sha256':sha(dr),'plan_sha256':sha(pr),'scope':scope,'manual_interval_declarations':True}
+    Path(out).mkdir(mode=mode,exist_ok=False)
     for n,b in {'plan.json':pr,'decisions.json':dr,'receipt.json':dump(receipt)}.items():(Path(out)/n).write_bytes(b)
     return {'plan_created':True,'masks':len(masks),'privacy_complete':False,'manual_full_output_review_required':True}
 
