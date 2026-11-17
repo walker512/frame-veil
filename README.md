@@ -4,7 +4,7 @@
 
 For an authorized screen recording, bind a manual rectangle plan to the source hash, render real lossless video, check frame/stream properties and export a decoded review frame. The original recording is never overwritten or included in the result bundle.
 
-This is a manual privacy-editing CLI, not automatic detection or a complete visual editing workbench. It does not find names, passwords, faces, spoken information, notifications or unmarked privacy risks. **Human review of the whole output remains mandatory.**
+The original editing modes are manual. Version 0.3.0 adds optional explicit-word OCR candidates on selected frames, not complete automatic privacy detection or a visual editing workbench. It does not discover all names, passwords, faces, spoken information, notifications or unmarked privacy risks. **Human review of the whole output remains mandatory.**
 
 ## Requirements and supported media
 
@@ -38,7 +38,7 @@ All output directories must be new. You can install the package with `python -m 
 
 1. Keep the original private and backed up. Use this only on media you are authorized to process.
 2. Run `inspect SOURCE.mp4`. It returns width, height, decoded frame count and SHA-256, not source tags or filenames.
-3. Using your own trusted video viewer/editor, identify the exact decoded frame ranges and pixel rectangles. There is no built-in box-drawing UI or face/OCR tracker. Do not assume a secret stays at a fixed location after scrolling or animation.
+3. Using your own trusted video viewer/editor, identify the exact decoded frame ranges and pixel rectangles. There is no built-in box-drawing UI or face/motion tracker. Optional OCR candidates can assist with explicitly requested words on selected frames; they do not replace full viewing. Do not assume a secret stays at a fixed location after scrolling or animation.
 4. Write a plan using the exact hash and dimensions from inspect:
 
 ```json
@@ -136,3 +136,9 @@ Version 0.1.1: 33 public tests passed on Linux/Python 3.12.14 with FFmpeg/ffprob
 The optional `review-prepare` → `review-decide` → `review-export` CLI workflow requires explicit decisions for every output video segment (text, faces, notifications/other) and retained audio segment. It binds all bundle bytes, rejects stale/missing/blocked decisions, and re-audits the actual media before exporting that exact snapshot. See [the complete local workflow and limits](docs/HUMAN_REVIEW.md). It records declarations, **not proof of viewing, privacy safety or publication consent**; existing render commands remain available. Playback is external, not an accepted interactive workstation.
 
 Local validation for this increment: the public suite includes actual synthetic-media review/export and failure-path tests. No new browser or cross-platform run is claimed.
+
+## Optional explicit-word OCR candidates (0.3.0)
+
+[Local OCR candidates](docs/OCR_CANDIDATES.md) decode explicitly selected frames, run installed English Tesseract, retain private image/TSV evidence, and require explicit human decisions before generating an existing mask plan. Zero matches and unselected frames are never privacy clearance. Full intermediate frames and recognized text are sensitive; nothing is uploaded. The original render/audio/review code and policies remain unchanged. This increment is a CLI workflow, not accepted screenshot/GUI editing or whole-recording recognition.
+
+0.3.0 verification: **88 tests passed, zero skips**, Linux/Python 3.12 with FFmpeg 7.1.5 and Tesseract 5.5.0/English. The original 64 tests and core/audio/review modules are unchanged. A separate real synthetic CLI run detected fictional names, generated explicit one-frame masks, rendered/audited 13,312 rectangle pixels and prepared a still-pending human review. It also missed a notification-like box, as disclosed in the OCR guide. No real student footage, Chinese or GUI acceptance is claimed.
