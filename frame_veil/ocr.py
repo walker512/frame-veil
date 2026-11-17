@@ -214,6 +214,29 @@ def load_scan(folder):
     m,found=validate_files(files)
     return files,m,found
 
+def coverage_report(files, manifest, found, terms_key='terms.json'):
+    """Describe verified sampling and exact matches, never semantic privacy recall."""
+    sampled=manifest['indexes'];total=manifest['info']['frames']
+    ranges=[];start=0
+    for index in sampled:
+        if start<index:ranges.append([start,index])
+        start=index+1
+    if start<total:ranges.append([start,total])
+    rows=[]
+    for ti in range(len(terms(files[terms_key]))):
+        hits=sorted({c['frame_index'] for c in found if c['term_index']==ti})
+        rows.append({'term_index':ti,'matched_sampled_frames':hits,
+                     'sampled_frames_without_exact_match':[i for i in sampled if i not in hits]})
+    return {'total_frames':total,'sampled_frames':sampled,
+            'unsampled_frame_ranges':ranges,'range_semantics':'start-inclusive,end-exclusive',
+            'terms':rows,'ocr_rerun':False,'privacy_complete':False,
+            'manual_full_output_review_required':True,
+            'warning':'No exact match can mean an OCR miss. Unsampled frames and unrequested text remain unknown; all frames require human review.'}
+
+def coverage(folder):
+    files,m,found=load_scan(folder)
+    return coverage_report(files,m,found)
+
 def prepare(folder,out):
     files,m,found=load_scan(folder)
     d={'schema':1,'scan_manifest_sha256':sha(files['manifest.json']),'source_sha256':m['source_sha256'],'decisions':[{'id':c['id'],'decision':'pending','note':'','mask':None} for c in found]}
@@ -251,11 +274,12 @@ def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0
 def main():
     p=argparse.ArgumentParser(description='Local explicit English OCR candidates on selected frames; never a privacy clearance.')
     sub=p.add_subparsers(dest='cmd',required=True);a=sub.add_parser('scan');a.add_argument('source');a.add_argument('--terms',required=True);a.add_argument('--frames',required=True);a.add_argument('--out',required=True)
-    a=sub.add_parser('verify');a.add_argument('scan');a=sub.add_parser('prepare');a.add_argument('scan');a.add_argument('--out',required=True)
+    a=sub.add_parser('verify');a.add_argument('scan');a=sub.add_parser('coverage');a.add_argument('scan');a=sub.add_parser('prepare');a.add_argument('scan');a.add_argument('--out',required=True)
     a=sub.add_parser('plan');a.add_argument('source');a.add_argument('scan');a.add_argument('decisions');a.add_argument('--out',required=True)
     args=p.parse_args()
     try:
         if args.cmd=='scan':r=scan(args.source,args.terms,args.frames,args.out)
+        elif args.cmd=='coverage':r=coverage(args.scan)
         elif args.cmd=='prepare':r=prepare(args.scan,args.out)
         elif args.cmd=='plan':r=plan(args.source,args.scan,args.decisions,args.out)
         else:_,m,c=load_scan(args.scan);r={'internally_consistent':True,'sampled_frames':len(m['indexes']),'candidates':len(c),'ocr_rerun':False,'privacy_complete':False}

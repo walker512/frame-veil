@@ -31,6 +31,40 @@ def regions(raw, info=None):
         if r['threshold'] is not None: core.integer(r['threshold'], 0, 255)
     return result
 
+def paired_regions(raw):
+    """Keep explicit variants, adding an unthresholded control where missing.
+
+    The expanded regions.json is retained verbatim by the normal scan workflow.
+    No region, scale or sampling interval is inferred.
+    """
+    requested = regions(raw)
+    result = [dict(r) for r in requested]
+    ids = {r['id'] for r in result}
+    keys = ('x', 'y', 'width', 'height', 'scale')
+    for r in requested:
+        if r['threshold'] is None:
+            continue
+        if any(c['threshold'] is None and all(c[k] == r[k] for k in keys) for c in result):
+            continue
+        suffix = 1
+        while 'control-' + str(suffix) in ids:
+            suffix += 1
+        ident = 'control-' + str(suffix); ids.add(ident)
+        result.append({**r, 'id': ident, 'threshold': None})
+    # Respect existing evidence/resource bounds; never drop variants to fit.
+    return regions(core.canonical(result))
+
+def scan_paired(source, terms_path, frames_path, regions_path, out):
+    expanded = paired_regions(core.read(regions_path))
+    # Fail before spawning media tools when the expanded execution bound fails.
+    indexes = ocr.indices(core.read(frames_path))
+    if len(indexes) * (1 + len(expanded)) > MAX_CALLS:
+        raise Invalid('Paired region execution count exceeds limit.')
+    with tempfile.TemporaryDirectory(prefix='frame-paired-') as td:
+        config = Path(td) / 'regions.json'
+        ocr.private_write(config, core.canonical(expanded))
+        return scan(source, terms_path, frames_path, config, out)
+
 def budget(rs, indexes, info):
     if len(indexes) * (1 + len(rs)) > MAX_CALLS:
         raise Invalid('Baseline plus region OCR exceeds 64 executions.')
@@ -174,6 +208,16 @@ def scan(source, terms_path, frames_path, regions_path, out):
         publish(files, out)
     return {'scan_completed': True, 'sampled_frames': len(indexes), 'regions': len(rs), 'candidate_count': len(found), 'baseline_candidates': len(bc), 'privacy_complete': False, 'manual_review_required': True}
 
+def coverage(folder):
+    files, manifest, found = load_scan(folder)
+    report = ocr.coverage_report(files, manifest, found, 'base-terms.json')
+    report['baseline'] = ocr.coverage_report(files, manifest, [c for c in found if c['origin'] == 'full-frame'], 'base-terms.json')['terms']
+    report['regions'] = [
+        {'region_id': r['id'], 'threshold': r['threshold'], 'scale': r['scale'],
+         'terms': ocr.coverage_report(files, manifest, [c for c in found if c['origin'] == 'region' and c['region_id'] == r['id']], 'base-terms.json')['terms']}
+        for r in regions(files['regions.json'], manifest['info'])]
+    return report
+
 def prepare(folder, out):
     files, m, found = load_scan(folder)
     d = {'schema': 1, 'scan_manifest_sha256': ocr.sha(files['manifest.json']), 'source_sha256': m['source_sha256'],
@@ -189,12 +233,17 @@ def main():
     p = argparse.ArgumentParser(description=SCOPE); sub = p.add_subparsers(dest='cmd', required=True)
     a = sub.add_parser('scan'); a.add_argument('source')
     for arg in ('terms', 'frames', 'regions', 'out'): a.add_argument('--' + arg, required=True)
+    a.add_argument('--pair-unthresholded', action='store_true', help='Retain an unthresholded control for each thresholded crop/scale; bounds still apply.')
     a = sub.add_parser('verify'); a.add_argument('scan')
+    a = sub.add_parser('coverage'); a.add_argument('scan')
     a = sub.add_parser('prepare'); a.add_argument('scan'); a.add_argument('--out', required=True)
     a = sub.add_parser('plan'); a.add_argument('source'); a.add_argument('scan'); a.add_argument('decisions'); a.add_argument('--out', required=True)
     args = p.parse_args()
     try:
-        if args.cmd == 'scan': r = scan(args.source, args.terms, args.frames, args.regions, args.out)
+        if args.cmd == 'scan':
+            runner = scan_paired if args.pair_unthresholded else scan
+            r = runner(args.source, args.terms, args.frames, args.regions, args.out)
+        elif args.cmd == 'coverage': r = coverage(args.scan)
         elif args.cmd == 'prepare': r = prepare(args.scan, args.out)
         elif args.cmd == 'plan': r = plan(args.source, args.scan, args.decisions, args.out)
         else:
