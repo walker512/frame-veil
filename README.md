@@ -146,3 +146,15 @@ Local validation for this increment: the public suite includes actual synthetic-
 [Local OCR candidates](docs/OCR_CANDIDATES.md) decode explicitly selected frames, run installed English Tesseract, retain private image/TSV evidence, and require explicit human decisions before generating an existing mask plan. Zero matches and unselected frames are never privacy clearance. Full intermediate frames and recognized text are sensitive; nothing is uploaded. The original render/audio/review code and policies remain unchanged. This increment is a CLI workflow, not accepted screenshot/GUI editing or whole-recording recognition.
 
 0.3.0 verification: **88 tests passed, zero skips**, Linux/Python 3.12 with FFmpeg 7.1.5 and Tesseract 5.5.0/English. The original 64 tests and core/audio/review modules are unchanged. A separate real synthetic CLI run detected fictional names, generated explicit one-frame masks, rendered/audited 13,312 rectangle pixels and prepared a still-pending human review. It also missed a notification-like box, as disclosed in the OCR guide. No real student footage, Chinese or GUI acceptance is claimed.
+
+### OCR artifact permissions (0.4.1)
+
+Both selected-frame and explicit-region OCR now create scan and plan directories
+with owner-only POSIX permissions (0700), and their evidence, decision, plan and
+receipt files with 0600 from creation, even under umask 022 or 000. Existing
+artifacts are never overwritten or automatically chmodded. Private scratch images
+also use owner-only file creation. This does not fix copies previously generated
+with broader permissions: keep those in an owner-only directory and review their
+permissions before reuse. These are POSIX mode guarantees, not Windows ACL,
+hostile-parent-directory, administrator-access or complete-video privacy guarantees.
+Other manual render/audio/review output permissions are outside this narrow fix.
