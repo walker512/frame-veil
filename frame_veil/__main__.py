@@ -1,0 +1,20 @@
+import argparse,json,sys
+from .core import Invalid,inspect,render,verify,frame
+
+def main():
+    p=argparse.ArgumentParser(description='Manual frame-index masks; removes ALL audio. Trusted FFmpeg required.')
+    sub=p.add_subparsers(dest='command',required=True)
+    a=sub.add_parser('inspect');a.add_argument('source')
+    a=sub.add_parser('render');a.add_argument('source');a.add_argument('plan');a.add_argument('--out',required=True)
+    a=sub.add_parser('verify');a.add_argument('folder')
+    a=sub.add_parser('frame');a.add_argument('folder');a.add_argument('--index',type=int,required=True);a.add_argument('--out',required=True)
+    args=p.parse_args()
+    try:
+        if args.command=='inspect':r=inspect(args.source)
+        elif args.command=='render':r=render(args.source,args.plan,args.out)
+        elif args.command=='verify':r=verify(args.folder)
+        else:r=frame(args.folder,args.index,args.out)
+        print(json.dumps(r));return 0
+    except (Invalid,OSError,ValueError,RecursionError):
+        print('Cannot process media or plan: unsupported input, mismatch, bounds, missing FFmpeg, timeout or filesystem failure. Media contents and tool diagnostics are not echoed.',file=sys.stderr);return 2
+if __name__=='__main__':sys.exit(main())
