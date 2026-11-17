@@ -218,3 +218,59 @@ paired path also recovered the requested notice in the separate pale-background,
 gray-text fixture that threshold 110 alone lost. Both observations use fictional
 English text, installed Tesseract and real decoded pixels. The prior known-negative
 threshold-only tests remain, rather than being removed to inflate success.
+
+## Explicit short-interval second pass (0.6.0)
+
+Sparse sampling can miss a transient notice completely. After checking
+`coverage`, choose a short interval in a trusted viewer and rescan **every**
+frame in it, without manually constructing an index JSON file:
+
+```sh
+python -m examples.moving_text_synthetic moving-demo
+python -m frame_veil.region_ocr scan moving-demo/synthetic.mp4 --terms moving-demo/terms.json --frames moving-demo/frames.json --regions moving-demo/regions.json --out moving-sparse
+python -m frame_veil.region_ocr coverage moving-sparse
+python -m frame_veil.region_ocr scan moving-demo/synthetic.mp4 --terms moving-demo/terms.json --frame-range 0 6 --regions moving-demo/regions.json --out moving-dense
+python -m frame_veil.region_ocr coverage moving-dense
+python -m frame_veil.region_ocr prepare moving-dense --out moving-decisions.json
+```
+
+The legacy `frame_veil.ocr scan` supports the same `--frame-range START END`
+alternative. The end index is excluded. Choose **either** `--frames` or
+`--frame-range`, never both. This is an easier explicit dense-sampling workflow,
+not a more capable OCR model or automatic motion tracking.
+
+The interval must contain 1–24 frames and fit the actual source. For region
+scans, frame count × (1 + expanded region count) must be at most 64. Thus 24
+frames with one region use 48 OCR calls, while 24 frames with a thresholded
+region plus its paired control would require 72 and are rejected before media
+tools start. Choose a smaller explicit interval/configuration; nothing is silently
+subsampled. Existing decoded RGB, derived-pixel, TSV and candidate limits still
+apply and may reject even a valid frame count. This is not an unbounded batch
+runner: use separately reviewed new output directories for additional intervals.
+
+Each frame gets its own actual image/TSV/candidate evidence in the existing
+verifiable bundle. The normal source-bound pending-decision workflow remains.
+After inspecting the images, explicitly set each accepted mask's spatial box
+and duration; a one-frame observation is not extended automatically. Do not reuse
+decisions from a different scan. Render, run the mask pixel audit, then perform
+the required human full-output review. The sampled union does not merge plans
+from different scans automatically.
+
+The original six-frame moving fixture has fictional text only on frames 1, 2
+and 4 at three different horizontal positions. Sparse samples [0, 3] miss all
+three. The interval [0, 6) finds the requested text on all three observed frames,
+retains all six sampled-frame images, and supports manually confirmed one-frame
+masks that pass the existing pixel audit. The resulting human review record is
+still pending. This demonstrates fixing a **sampling omission in this fixture**,
+not universal moving-text recall or full-video privacy. Blurred/occluded text,
+text outside the configured region, other words/languages and events outside the
+interval can still be missed. Even no unsampled ranges does not mean no leaks.
+
+Coverage output includes user-supplied region IDs, which can themselves contain
+sensitive identifiers. Do not publish it without checking those IDs as well as
+the sampling indices/counts.
+
+Local 0.6.0 validation: 122 tests passed, zero skips, including six new interval
+schema, CLI exclusivity, umask-000 permission, source/end/call-bound,
+moving-text recovery and pending-review render/audit tests. These are local
+synthetic checks, not independent certification or proof of human viewing.
