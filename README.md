@@ -130,3 +130,9 @@ Version 0.1.1: 33 public tests passed on Linux/Python 3.12.14 with FFmpeg/ffprob
 ## Optional selective audio muting (0.2.0)
 
 [Selective audio](docs/SELECTIVE_AUDIO.md) binds manual sample intervals to the same source as the frame masks, preserves normalized PCM outside those intervals, and produces a listenable WAV plus the combined recording. Its verifier checks the final audio samples and the actual combined video masks. Default all-audio removal remains unchanged. Real synthetic mono/stereo tests exercise the whole flow; unmarked speech remains private until you review it.
+
+## Human review before export (0.2.1)
+
+The optional `review-prepare` → `review-decide` → `review-export` CLI workflow requires explicit decisions for every output video segment (text, faces, notifications/other) and retained audio segment. It binds all bundle bytes, rejects stale/missing/blocked decisions, and re-audits the actual media before exporting that exact snapshot. See [the complete local workflow and limits](docs/HUMAN_REVIEW.md). It records declarations, **not proof of viewing, privacy safety or publication consent**; existing render commands remain available. Playback is external, not an accepted interactive workstation.
+
+Local validation for this increment: the public suite includes actual synthetic-media review/export and failure-path tests. No new browser or cross-platform run is claimed.
