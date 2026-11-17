@@ -25,6 +25,7 @@ python -m examples.synthetic demo
 python -m frame_veil inspect demo/synthetic.mp4
 python -m frame_veil render demo/synthetic.mp4 demo/plan.json --out redacted-demo
 python -m frame_veil verify redacted-demo
+python -m frame_veil audit-masks redacted-demo
 python -m frame_veil frame redacted-demo --index 4 --out frame-review
 python -m unittest discover -s tests -v
 ```
@@ -102,8 +103,25 @@ Primary documentation was reviewed; those product runtimes were not compared. Th
 
 ## Validation
 
-24 public tests executed on Linux/Python 3.12 with FFmpeg 7.1.5. The real-media tests generate original synthetic video+tone, render it, decode all ten source and output frames to RGB, and compare **every pixel** against the expected union of masks. Unmasked pixels remain equal in this fixture. Actual audio removal, source-title/stream-tag removal, PNG extraction, source-binding failure, receipt/file tampering and CLI calls are also tested. Real 64-stream input (one video plus 63 AAC tracks) renders and self-verifies; 65-stream input is rejected by inspect and render before output creation.
+Original 0.1.0 release: 24 public tests executed on Linux/Python 3.12 with FFmpeg 7.1.5. The real-media tests generate original synthetic video+tone, render it, decode all ten source and output frames to RGB, and compare **every pixel** against the expected union of masks. Unmasked pixels remain equal in this fixture. Actual audio removal, source-title/stream-tag removal, PNG extraction, source-binding failure, receipt/file tampering and CLI calls are also tested. Real 64-stream input (one video plus 63 AAC tracks) renders and self-verifies; 65-stream input is rejected by inspect and render before output creation.
 
 No Windows/macOS, hosted CI, browser playback, real lecture recording, HDR/color-managed workflow, variable-frame-rate corpus or adversarial decoder corpus was tested. Real-media tests explicitly skip if FFmpeg is unavailable; skips are not passes. The synthetic preview frame was inspected locally; that is not validation of a user's recording.
 
 MIT license, original code and synthetic generator by walker512. No real course footage, student data, personal voice recording or upstream competitor source is included.
+
+
+## Independently audit the rendered masks
+
+`python -m frame_veil audit-masks OUTPUT_BUNDLE` first performs the existing byte/stream checks, then decodes the actual lossless output and checks **every RGB channel of every pixel in every declared rectangle, on every declared frame**. It does not trust a matching receipt alone. A re-encoded output with a nonblack pixel inside a mask is rejected even if someone recomputes its receipt hash.
+
+Success reports `declared_masks_opaque: true`, decoded/marked frame counts and rectangle-pixel checks (overlapping rectangles count again). Audio absence is checked through the verified output stream list. The command decodes one RGB frame at a time rather than holding the entire raw recording in memory; the existing bounded compressed-file snapshot still occupies memory. A 120-second watchdog kills a stalled decoder, and incomplete/extra decoded data, decoder errors and timeout do not produce success. A large recording can exceed this time budget. This is not an OS/FFmpeg sandbox or a guarantee against uninterruptible filesystem/kernel operations.
+
+On a detected nonblack pixel, the command exits **3** and reports the first zero-based `frame_index`, `mask_index` in the supplied plan, and `pixel_row`. It stops there (`audit_completed: false`), so inspect/re-render the plan and audit again; do not infer the rest of the output passed. Exit **2** means the audit could not be completed because of input/structure/decoder/timeout errors. Only exit **0** with the positive result represents a completed declared-mask audit. Pixel values, media content, filenames and decoder diagnostic text are not included in error output.
+
+`verify` remains the cheaper hash/stream check and does **not** invoke the pixel audit. Its JSON now also exposes the bound `plan_sha256`; other receipt/bundle files are unchanged. `audit-masks` rechecks the plan/video hashes after reading them, then uses private snapshots, so a change between structural verification and rereading is rejected.
+
+**The auditor is not a privacy certificate.** It cannot tell whether you marked all secrets, selected the right frames, supplied the intended source, or changed unmasked parts of the recording. A wholly black video, or a video altered outside the specified masks, can pass this narrow check. A maliciously changed plan is not authenticated. Human review of the entire recording and authorization to publish remain mandatory. All audio is still removed; selective audio editing, automatic visual/speech detection and the complete classroom review interface remain unimplemented.
+
+### Increment verification
+
+Version 0.1.1: 33 public tests passed on Linux/Python 3.12.14 with FFmpeg/ffprobe 7.1.5, zero skips. The nine added tests use original synthetic media and real decoding: successful overlapping masks, a single altered masked pixel with rehashed receipt, a wrong rectangle with rehashed plan/receipt, allowed unmarked/end-exclusive changes, read-after-verify mismatch, real-process timeout, malformed decoder output and actual CLI pass/failure location. Decoder-failure unit cases substitute a controlled Python child process; they are not evidence about arbitrary FFmpeg failures. No new Windows/macOS or browser validation and no real private recording was used.
