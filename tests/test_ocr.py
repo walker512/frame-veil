@@ -41,6 +41,15 @@ class RealOCRTests(unittest.TestCase):
             before=decision.read_bytes()
             result=subprocess.run(args+['prepare',str(scan),'--out',str(decision)],cwd=ROOT,capture_output=True,umask=mask)
             self.assertEqual(result.returncode,2);self.assertEqual(decision.read_bytes(),before)
+    def test_verified_coverage_cli_and_no_tool(self):
+        with patch.object(ocr,'bounded_tool',side_effect=AssertionError('offline')):
+            result=ocr.coverage(self.scan)
+        self.assertEqual(result['unsampled_frame_ranges'],[[1,3],[4,6]])
+        self.assertEqual(result['terms'][0]['matched_sampled_frames'],[0,3])
+        self.assertEqual(result['terms'][1]['sampled_frames_without_exact_match'],[0,3])
+        self.assertFalse(result['privacy_complete']);self.assertTrue(result['manual_full_output_review_required'])
+        result=subprocess.run([sys.executable,'-m','frame_veil.ocr','coverage',str(self.scan)],cwd=ROOT,capture_output=True)
+        self.assertEqual(result.returncode,0);self.assertNotIn(b'Alice',result.stdout)
     def test_actual_ocr_candidates(self):
         files,m,c=ocr.load_scan(self.scan);self.assertEqual(m['indexes'],[0,3]);self.assertEqual(m['info']['frames'],6);self.assertTrue(c);self.assertEqual({x['frame_index'] for x in c},{0,3});self.assertTrue(any(x['term_index']==0 for x in c));self.assertFalse(m['privacy_complete']);self.assertTrue(all(x['words'] for x in c))
     def test_render_audit_and_human_review(self):
@@ -137,6 +146,12 @@ class OCRSchemaTests(unittest.TestCase):
             link=Path(td)/'link';link.symlink_to(path)
             with self.assertRaises(FileExistsError):ocr.private_write(link,b'changed')
             self.assertEqual(path.read_bytes(),b'fictional')
+    def test_coverage_range_boundaries_and_zero_hits(self):
+        for frames,total,expected in [([0],1,[]),([2],5,[[0,2],[3,5]]),([0,1,2],3,[]),([0,2,4],5,[[1,2],[3,4]])]:
+            result=ocr.coverage_report({'terms.json':b'["fictional"]'},{'indexes':frames,'info':{'frames':total}},[])
+            self.assertEqual(result['unsampled_frame_ranges'],expected)
+            self.assertEqual(result['terms'][0]['sampled_frames_without_exact_match'],frames)
+            self.assertFalse(result['privacy_complete'])
     def test_contiguous_same_line_only(self):
         raw=tsv([(1,1,0,'90','Alice'),(1,2,25,'80','Sample')]);c=ocr.candidates(raw,['ALICE SAMPLE'],0,100,100);self.assertEqual(len(c),1);self.assertEqual(c[0]['box'],{'x':0,'y':10,'width':45,'height':10})
         self.assertEqual(ocr.candidates(tsv([(1,1,0,'90','Alice'),(2,1,25,'80','Sample')]),['Alice Sample'],0,100,100),[])

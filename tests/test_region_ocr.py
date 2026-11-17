@@ -13,6 +13,16 @@ def rehash(files):
     m=core.parse(files['manifest.json']);m['files']={n:ocr.sha(b) for n,b in files.items() if n!='manifest.json'};files['manifest.json']=core.canonical(m)
 
 class RegionSchemaTests(unittest.TestCase):
+    def test_paired_config_preserves_and_deduplicates_controls(self):
+        request=[{**R,'id':'control-1','threshold':180},{**R,'id':'other','threshold':110}]
+        result=reg.paired_regions(core.canonical(request))
+        self.assertEqual(result[:2],request);self.assertEqual(len(result),3)
+        self.assertEqual(result[2],{**R,'id':'control-2','threshold':None})
+        self.assertEqual(reg.paired_regions(core.canonical(result)),result)
+        self.assertEqual(reg.paired_regions(core.canonical([R])),[R])
+    def test_pair_expansion_bound_rejects_without_tools(self):
+        request=[{**R,'id':'r'+str(i),'x':i,'width':10,'threshold':180} for i in range(5)]
+        with self.assertRaises(ValueError):reg.paired_regions(core.canonical(request))
     def test_strict_regions(self):
         for k,v in [('x',True),('y',-1),('width',0),('height',1081),('scale',4),('scale',True),('threshold',True),('threshold',256),('id','../x')]:
             r={**R,k:v}
@@ -64,6 +74,38 @@ class RealRegionTests(unittest.TestCase):
         for row,c in zip(data['decisions'],found):
             row.update(decision='accept',note='Synthetic test interval, not a declaration of viewing.',mask={'start_frame':c['frame_index'],'end_frame':c['frame_index']+1,**c['box']})
         d.write_bytes(core.canonical(data));return d
+    def test_paired_real_destructive_threshold_recovers_notice(self):
+        request=[{**R,'threshold':180}]
+        self.runscan(request,'single');_,_,single=reg.load_scan(self.p/'single')
+        self.assertEqual([c for c in single if c['origin']=='region'],[])
+        original=(self.p/'regions').read_bytes()
+        result=reg.scan_paired(self.media/'synthetic.mp4',self.media/'terms.json',self.media/'frames.json',self.p/'regions',self.p/'paired')
+        self.assertEqual((self.p/'regions').read_bytes(),original)
+        files,m,found=reg.load_scan(self.p/'paired')
+        self.assertEqual(core.parse(files['regions.json'])[0],request[0])
+        self.assertEqual(len(core.parse(files['regions.json'])),2)
+        self.assertEqual([(c['frame_index'],c['term_index']) for c in found if c['origin']=='full-frame'],[(c['frame_index'],c['term_index']) for c in single])
+        self.assertEqual({(c['frame_index'],c['term_index']) for c in found if c['origin']=='region'},{(0,1),(3,1)})
+        self.assertFalse(result['privacy_complete']);self.assertTrue(result['manual_review_required'])
+        coverage=reg.coverage(self.p/'paired')
+        self.assertEqual(coverage['unsampled_frame_ranges'],[[1,3],[4,6]])
+        self.assertEqual(coverage['regions'][0]['terms'][1]['matched_sampled_frames'],[])
+        self.assertEqual(coverage['regions'][1]['terms'][1]['matched_sampled_frames'],[0,3])
+        self.assertFalse(coverage['privacy_complete'])
+        for i in (0,3):
+            self.assertIn(reg.names(i,0)[0],files);self.assertIn(reg.names(i,1)[0],files)
+        # Offline verification replays retained pixels and TSV, not another OCR run.
+        with patch.object(ocr,'bounded_tool',side_effect=AssertionError('offline only')):
+            reg.load_scan(self.p/'paired')
+    def test_paired_cli_and_early_budget(self):
+        config=self.p/'regions';config.write_bytes(core.canonical([{**R,'threshold':180}]))
+        args=[sys.executable,'-m','frame_veil.region_ocr','scan',str(self.media/'synthetic.mp4'),'--terms',str(self.media/'terms.json'),'--frames',str(self.media/'frames.json'),'--regions',str(config),'--out',str(self.p/'paired'),'--pair-unthresholded']
+        result=subprocess.run(args,cwd=ROOT,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(json.loads(result.stdout)['regions'],2)
+        many=self.p/'frames';many.write_bytes(core.canonical(list(range(24))))
+        with patch.object(ocr,'bounded_tool',side_effect=AssertionError('must fail before tools')):
+            with self.assertRaises(ValueError):reg.scan_paired(self.media/'synthetic.mp4',self.media/'terms.json',many,config,self.p/'too-many')
+        self.assertFalse((self.p/'too-many').exists())
     def test_actual_notice_recovered_baseline_preserved(self):
         files,m,c=reg.load_scan(self.scan);_,bc=ocr.validate_files({n[5:]:b for n,b in files.items() if n.startswith('base-')})
         self.assertIn(0,{x['term_index'] for x in bc})
@@ -90,6 +132,10 @@ class RealRegionTests(unittest.TestCase):
             reg.scan(path,self.media/'terms.json',self.p/'f',self.p/'r',self.p/label)
             _,m,c=reg.load_scan(self.p/label)
             self.assertEqual(any(z['term_index']==1 and z['origin']=='region' for z in c),expected,label)
+            if label=='pale':
+                reg.scan_paired(path,self.media/'terms.json',self.p/'f',self.p/'r',self.p/'pale-paired')
+                _,_,paired=reg.load_scan(self.p/'pale-paired')
+                self.assertTrue(any(z['term_index']==1 and z['origin']=='region' for z in paired))
             self.assertFalse(m['privacy_complete'])
     def test_zero_hits_pending_not_clearance(self):
         result=self.runscan([R],terms=['DOESNOTEXISTZZZ']);self.assertEqual(result['candidate_count'],0);self.assertFalse(result['privacy_complete'])
