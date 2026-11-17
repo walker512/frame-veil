@@ -1,6 +1,6 @@
 # Frame Veil
 
-**Make a separately reviewable recording copy with exact frame-bound opaque masks. All audio is removed.**
+**Make a separately reviewable recording copy with exact frame-bound opaque masks. Default render removes all audio; an explicit sample-muting path can preserve reviewed narration.**
 
 For an authorized screen recording, bind a manual rectangle plan to the source hash, render real lossless video, check frame/stream properties and export a decoded review frame. The original recording is never overwritten or included in the result bundle.
 
@@ -56,7 +56,7 @@ All output directories must be new. You can install the package with `python -m 
 
 The placeholder hash deliberately is not valid; do not use it unchanged. A plan for any other source bytes is rejected. Changing a recording, even metadata, requires inspecting and reviewing a new plan.
 
-5. Run `render SOURCE.mp4 PLAN.json --out NEW_DIRECTORY`. This makes a **new video copy**, never changes the source, and removes **all** audio, subtitles, data/attachment streams and chapters from the output mapping. There is no selective audio muting or retain-audio option in this release. For teaching material where narration is essential, this scope is not a complete solution.
+5. Run `render SOURCE.mp4 PLAN.json --out NEW_DIRECTORY`. This makes a **new video copy**, never changes the source, and removes **all** audio, subtitles, data/attachment streams and chapters from the output mapping. For a supported single-track recording where narration matters, use the separate opt-in [selective audio workflow](docs/SELECTIVE_AUDIO.md). The default command still retains no audio.
 6. Verify the result, then manually watch the entire redacted copy in a supporting player. Inspect frames around every mask boundary. `frame RESULT --index N --out NEW_DIRECTORY` extracts only from the processed copy, not the original.
 
 `inspect`, `render`, `verify` and `frame` exit 0 on their documented operation completing, 2 on invalid/unsupported input, mismatch, timeout, unavailable tools or I/O failure. **Exit 0 does not mean the video is safe to publish.**
@@ -72,9 +72,9 @@ The placeholder hash deliberately is not valid; do not use it unchanged. A plan 
 
 There is no automatic padding or motion tracking. Choose an appropriately generous region and frame interval, then verify it visually. Sensitive pixels outside your rectangles are intentionally preserved and may remain visible. Anything inside unmasked frames remains visible. A black rectangle is not automatic identity anonymization.
 
-## Output and verification
+## Default render output and verification
 
-A successful result directory contains exactly:
+A successful default `render` result directory contains exactly (the optional audio-render layout is documented separately):
 
 - `redacted.mkv`: rendered lossless video with one video stream and no audio.
 - `plan.json`: the supplied plan bytes.
@@ -120,8 +120,13 @@ On a detected nonblack pixel, the command exits **3** and reports the first zero
 
 `verify` remains the cheaper hash/stream check and does **not** invoke the pixel audit. Its JSON now also exposes the bound `plan_sha256`; other receipt/bundle files are unchanged. `audit-masks` rechecks the plan/video hashes after reading them, then uses private snapshots, so a change between structural verification and rereading is rejected.
 
-**The auditor is not a privacy certificate.** It cannot tell whether you marked all secrets, selected the right frames, supplied the intended source, or changed unmasked parts of the recording. A wholly black video, or a video altered outside the specified masks, can pass this narrow check. A maliciously changed plan is not authenticated. Human review of the entire recording and authorization to publish remain mandatory. All audio is still removed; selective audio editing, automatic visual/speech detection and the complete classroom review interface remain unimplemented.
+**The auditor is not a privacy certificate.** It cannot tell whether you marked all secrets, selected the right frames, supplied the intended source, or changed unmasked parts of the recording. A wholly black video, or a video altered outside the specified masks, can pass this narrow check. A maliciously changed plan is not authenticated. Human review of the entire recording and authorization to publish remain mandatory. This default video-only audit still requires all audio absent. The separate audio-verify command handles explicitly muted audio bundles; automatic visual/speech detection and the complete classroom review interface remain unimplemented.
 
 ### Increment verification
 
 Version 0.1.1: 33 public tests passed on Linux/Python 3.12.14 with FFmpeg/ffprobe 7.1.5, zero skips. The nine added tests use original synthetic media and real decoding: successful overlapping masks, a single altered masked pixel with rehashed receipt, a wrong rectangle with rehashed plan/receipt, allowed unmarked/end-exclusive changes, read-after-verify mismatch, real-process timeout, malformed decoder output and actual CLI pass/failure location. Decoder-failure unit cases substitute a controlled Python child process; they are not evidence about arbitrary FFmpeg failures. No new Windows/macOS or browser validation and no real private recording was used.
+
+
+## Optional selective audio muting (0.2.0)
+
+[Selective audio](docs/SELECTIVE_AUDIO.md) binds manual sample intervals to the same source as the frame masks, preserves normalized PCM outside those intervals, and produces a listenable WAV plus the combined recording. Its verifier checks the final audio samples and the actual combined video masks. Default all-audio removal remains unchanged. Real synthetic mono/stereo tests exercise the whole flow; unmarked speech remains private until you review it.

@@ -3,8 +3,8 @@ requires = ["setuptools>=65"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "frame-veil"
-version = "0.1.1"
-description = "Manual frame-bound opaque video masking"
+version = "0.2.0"
+description = "Manual frame-bound masking and explicit sample-range audio muting"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "walker512"}]
