@@ -1,4 +1,6 @@
-# Explicit English OCR candidates (0.3.0)
+# Explicit English OCR candidates (introduced in 0.3.0)
+
+The original fixed full-frame workflow remains supported. Version 0.4 adds an optional [explicit-region workflow](REGION_OCR.md) for targeted missed areas; it preserves baseline evidence and does not remove the limitations below.
 
 This optional local workflow identifies **the exact words you ask for on the decoded frames you explicitly select**, then requires human decisions before producing an ordinary Frame Veil mask plan. It does not identify every student's name, classify private text, detect faces or spoken names, track notifications, or certify a recording safe to share. False positives and missed text are expected. Human review of the entire final output remains mandatory.
 

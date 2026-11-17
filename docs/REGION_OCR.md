@@ -1,0 +1,170 @@
+# Explicit region OCR (0.4.0)
+
+This workflow addresses a concrete 0.3 limitation: the public synthetic gray
+notification was missed by full-frame English OCR. The new path lets you specify
+rectangular areas and optional preprocessing, while **preserving every baseline
+candidate and its original evidence**. It is not automatic notification detection,
+a general privacy classifier, or proof that a recording is safe to publish.
+
+## Run locally
+
+Requires the same trusted local POSIX FFmpeg/ffprobe and Tesseract `eng` installation
+as [baseline OCR](OCR_CANDIDATES.md). No download, API key, remote service, model,
+font or binary is included. Examples require an existing Linux DejaVu Sans font.
+
+```sh
+python -m examples.region_ocr_synthetic demo-regions
+python -m frame_veil.region_ocr scan demo-regions/synthetic.mp4 \
+  --terms demo-regions/terms.json --frames demo-regions/frames.json \
+  --regions demo-regions/regions.json --out private-region-scan
+python -m frame_veil.region_ocr verify private-region-scan
+python -m frame_veil.region_ocr prepare private-region-scan --out decisions.json
+```
+
+Installed console command: `frame-veil-regions`. Examples are source-checkout
+modules, not installed console commands. Region configuration is a JSON array:
+
+```json
+[{"id":"notice","x":20,"y":180,"width":600,"height":70,"scale":2,"threshold":null}]
+```
+
+Coordinates describe the **original decoded frame**, not timestamps or CSS pixels.
+Every region applies to every explicitly selected frame. IDs must be unique ASCII
+letters followed by letters/digits/underscore/hyphen (maximum 40 characters).
+All seven fields are required; unknown fields and booleans in integer fields are
+rejected. Rectangles must fit the actual decoded dimensions. Scale is an integer
+1..3. Threshold is `null` (default/example preserves RGB), or integer 0..255.
+No arbitrary filters, commands or executable paths are accepted as configuration.
+
+The transform crops original RGB pixels, repeats each pixel/row `scale` times
+(nearest neighbor), and optionally binarizes with integer luma
+`(299*R + 587*G + 114*B + 500)//1000`: luma >= threshold becomes white, otherwise
+black. Binarization is applied to the source pixel before repetition, with the
+same result as after repetition. There is no interpolation or implicit contrast
+optimization. **A threshold can destroy text contrast and increase misses.**
+
+OCR remains fixed to `eng --oem 1 --psm 6`. Phrase matching follows baseline
+casefold/consecutive-whole-token rules. Full-frame matches use `base-` IDs;
+region matches use `region-REGION_ID-` IDs. Overlapping regions and baseline hits
+can produce duplicate-looking candidates. They are intentionally retained with
+separate identities and must each be decided, not silently deduplicated.
+
+## Coordinates, evidence and verification
+
+A candidate and each word retain `derived_box` in cropped/enlarged coordinates.
+Their `box` coordinates are mapped back to the original frame: divide left/top
+by scale rounding down, divide right/bottom rounding up, then add crop origin.
+This conservatively covers fractional edge pixels. The candidate union and word
+boxes use the same mapping. Human padding may still be needed around glyphs.
+
+A scan keeps the entire old bundle under `base-*` names: original full RGB sample
+frames, baseline TSV/candidates/terms/frame indexes and manifest. It additionally
+keeps exact region configuration, every derived RGB PPM, every region TSV, combined
+candidates, diagnostics hashes, and a canonical manifest binding all files.
+`verify` first validates the restored baseline format, then independently recreates
+all derived pixels from full-frame samples and configuration, reparses the TSV,
+and recomputes coordinate mappings and merged candidates. It checks exact file
+sets, bounds, hashes, configuration, coverage, and canonical generated records.
+
+Offline verification starts **no tool**, does not decode the source, and does not
+rerun Tesseract. It proves internal consistency, not source authenticity or honest
+OCR execution. A coordinated rewrite of retained samples/TSV/manifests can be
+internally consistent. Tool version/diagnostic claims are not signed attestations;
+nonempty stderr content is not retained for independent recomputation. The plan
+step separately rehashes the full original video, including metadata, to reject a
+different source. A source hash is not proof that the sample pixels were decoded
+from those bytes.
+
+## Explicit decisions and actual masking
+
+`prepare` creates **pending** rows for all combined candidates. Edit a private copy
+using the same explicit `accept`/`dismiss`, reason, and mask structure documented
+in [OCR_CANDIDATES.md](OCR_CANDIDATES.md). Every candidate ID and order must remain;
+accepted mask rectangles must include the full mapped candidate box and its
+sampled frame. Intervals are manually chosen, never extrapolated from OCR hits.
+Zero accepted masks, zero candidates and pending decisions refuse plan creation.
+No automatic `viewed` or consent declaration is made.
+
+```sh
+# Only after actually making explicit decisions:
+python -m frame_veil.region_ocr plan demo-regions/synthetic.mp4 \
+  private-region-scan decisions.json --out explicit-plan
+python -m frame_veil render demo-regions/synthetic.mp4 explicit-plan/plan.json --out redacted
+python -m frame_veil audit-masks redacted
+python -m frame_veil review-prepare redacted --kind silent --out human-review.json
+```
+
+Plan creation uses the original validated manual-plan rules and binds source,
+region manifest, decision bytes and output plan. Default rendering still removes
+ALL audio. The human full-output review remains pending until the person actually
+reviews it. Mask pixel audit checks opaque declared pixels, not the adequacy of
+location/duration or coverage of other privacy risks. See [HUMAN_REVIEW.md](HUMAN_REVIEW.md).
+
+## Bounded operation and privacy
+
+- 1..8 regions, 1..24 selected frames; **baseline plus region OCR <=64 invocations**.
+- Original RGB samples <=64 MiB; total derived RGB samples <=64 MiB, prechecked
+  before region preprocessing. Each TSV <=1 MiB; aggregate baseline+region TSV
+  <=32 MiB. Combined candidates <=100; structured JSON <=1 MiB.
+- Whole bundle <=168 MiB (two 64 MiB RGB budgets +32 MiB TSV +8 MiB headers/JSON).
+- Source and format limits remain baseline's 64 MiB bounded H.264 MOV/MP4, square
+  pixels, no nonzero rotation, up to 1920x1080 and 1,800 frames.
+- The implementation first runs a full baseline scan in a private temporary
+  directory. This adds deliberate work/storage and retains baseline misses;
+  invalid actual-frame region bounds or derived-pixel budget may be rejected
+  **after** baseline OCR, but before region OCR. Invocation-count bounds are
+  checked before baseline work.
+- Probe/decode deadlines are 120 seconds each, each OCR/version/language command
+  30 seconds; up to 64 OCR calls plus four version/language calls means nominal
+  subprocess deadlines can total 2,280 seconds, plus cleanup/validation time.
+  This is not a hard end-to-end deadline or memory/CPU sandbox.
+- Fixed tools use the bounded POSIX process-group runner. No shell/network is
+  used by this workflow; trusted tools and hostile media still require external
+  isolation. Parent directory replacement and malicious tool installations are
+  outside its security guarantees.
+
+Scans contain **unredacted pixels and recognized private text**. Keep them private.
+New region scan and plan directories use POSIX mode 0700 even under umask 022;
+files inherit that directory protection, not encryption. New `prepare` decision files use POSIX mode 0600; keep their parent
+directory private too. Temporary cleanup is not secure deletion. This workflow never uploads
+artifacts. Do not publish a scan just because `verify` passed.
+
+Tool or validation failures occur before publishing output. Final filesystem write
+failure can leave a partial directory, which verification rejects; publication
+is not atomic. Existing outputs are refused and no user files are overwritten or
+silently deleted. Exit 0 means the selected operation completed, **never privacy
+clearance**. Exit 2 means invalid/unsupported data, pending decisions, bound,
+processing or I/O failure. Zero hits are not an error and not a clearance.
+
+## Validation boundary
+
+The original synthetic gray box is detected with region crop +2x nearest resize;
+threshold 64/110 also detects it, while threshold 180 loses the notice. The original
+full-frame name candidates remain in every case. Additional original synthetic
+right-side, white-on-dark and low-contrast layouts exercise the same generic
+transform, including deliberately destructive threshold cases. No word or box
+location is hardcoded into the algorithm.
+
+Tests cover exact pixel transformations and threshold boundary values, conservative
+word/union mapping, complete baseline preservation, duplicate-region identities,
+real process OCR, strict configuration, original/derived evidence tampering,
+rehashed incompatible artifacts, source/manifest/decision binding, offline no-tool
+verification, pending/all-dismissed/zero-hit rejection, output permissions, tool
+failure without publication, actual plan -> render -> independent mask pixel
+audit, and still-pending human whole-output review. Missing tools/font explicitly
+skip the real tests, never count as a pass.
+
+No real private videos, GUI, Chinese recognition, Windows/macOS, malicious-media
+corpus, temporal tracking, general recall benchmark, competitor superiority or
+production security certification is claimed. This is a targeted local workflow
+improvement, not complete automatic anonymization.
+
+### Executed local checks
+
+Linux/Python 3.12 with FFmpeg/ffprobe 7.1.5 and Tesseract 5.5.0:
+**108 tests passed, zero skips** (88 existing +20 region tests). The documented CLI
+example independently produced 2 baseline name and 2 region notice candidates,
+then 4 declared masks on 2 of 6 decoded frames. The actual output pixel audit
+checked 26,424 rectangle pixels including overlap and found all declared pixels
+opaque. The whole-output human review record remained pending. These are synthetic
+fixture observations, not real-world recall measurements or publication consent.
