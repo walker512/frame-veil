@@ -155,9 +155,13 @@ class RealRegionTests(unittest.TestCase):
         old=os.umask(0o022)
         try:
             self.runscan([R]);reg.prepare(self.p/'new',self.p/'private-decisions')
+            reg.plan(self.media/'synthetic.mp4',self.scan,self.decisions(),self.p/'private-plan')
         finally:os.umask(old)
         self.assertEqual((self.p/'new').stat().st_mode&0o777,0o700)
+        for artifact in (self.p/'new').iterdir():self.assertEqual(artifact.stat().st_mode&0o777,0o600,artifact.name)
         self.assertEqual((self.p/'private-decisions').stat().st_mode&0o777,0o600)
+        self.assertEqual((self.p/'private-plan').stat().st_mode&0o777,0o700)
+        for artifact in (self.p/'private-plan').iterdir():self.assertEqual(artifact.stat().st_mode&0o777,0o600,artifact.name)
     def test_cli_verify_pending_error(self):
         args=[sys.executable,'-m','frame_veil.region_ocr'];p=subprocess.run(args+['verify',str(self.scan)],cwd=ROOT,capture_output=True);self.assertEqual(p.returncode,0)
         p=subprocess.run(args+['prepare',str(self.scan),'--out',str(self.p/'d')],cwd=ROOT,capture_output=True);self.assertEqual(p.returncode,0)

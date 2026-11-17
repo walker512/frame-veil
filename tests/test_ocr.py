@@ -20,6 +20,27 @@ class RealOCRTests(unittest.TestCase):
         f=self.p/'decisions.json';ocr.prepare(self.scan,f);d=core.parse(f.read_bytes());_,m,c=ocr.load_scan(self.scan)
         for row,item in zip(d['decisions'],c):row.update(decision='accept',note='Synthetic explicit one-frame interval, not a claim of viewing.',mask={'start_frame':item['frame_index'],'end_frame':item['frame_index']+1,**item['box']})
         f.write_bytes(core.canonical(d));return f
+    def test_legacy_cli_artifacts_private_under_permissive_umasks(self):
+        args=[sys.executable,'-m','frame_veil.ocr']
+        for mask in (0o022,0):
+            base=self.p/str(mask);base.mkdir();scan=base/'scan';decision=base/'decisions.json';plan=base/'plan'
+            def run(argv):
+                result=subprocess.run(args+argv,cwd=ROOT,capture_output=True,umask=mask)
+                self.assertEqual(result.returncode,0,result.stderr)
+            run(['scan',str(self.source),'--terms',str(self.media/'terms.json'),'--frames',str(self.media/'frames.json'),'--out',str(scan)])
+            run(['prepare',str(scan),'--out',str(decision)])
+            d=core.parse(decision.read_bytes());_,_,found=ocr.load_scan(scan)
+            for row,c in zip(d['decisions'],found):
+                row.update(decision='accept',note='Fictional private review note',mask={'start_frame':c['frame_index'],'end_frame':c['frame_index']+1,**c['box']})
+            decision.write_bytes(core.canonical(d))
+            run(['plan',str(self.source),str(scan),str(decision),'--out',str(plan)])
+            for directory in (scan,plan):
+                self.assertEqual(directory.stat().st_mode&0o777,0o700)
+                for artifact in directory.iterdir():self.assertEqual(artifact.stat().st_mode&0o777,0o600,artifact.name)
+            self.assertEqual(decision.stat().st_mode&0o777,0o600)
+            before=decision.read_bytes()
+            result=subprocess.run(args+['prepare',str(scan),'--out',str(decision)],cwd=ROOT,capture_output=True,umask=mask)
+            self.assertEqual(result.returncode,2);self.assertEqual(decision.read_bytes(),before)
     def test_actual_ocr_candidates(self):
         files,m,c=ocr.load_scan(self.scan);self.assertEqual(m['indexes'],[0,3]);self.assertEqual(m['info']['frames'],6);self.assertTrue(c);self.assertEqual({x['frame_index'] for x in c},{0,3});self.assertTrue(any(x['term_index']==0 for x in c));self.assertFalse(m['privacy_complete']);self.assertTrue(all(x['words'] for x in c))
     def test_render_audit_and_human_review(self):
@@ -105,6 +126,17 @@ class RealOCRTests(unittest.TestCase):
         with patch.object(subprocess,'Popen',side_effect=AssertionError('must not launch')):ocr.load_scan(self.scan)
 
 class OCRSchemaTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=='posix','POSIX mode semantics')
+    def test_private_writer_exclusive_and_symlink_safe(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/'artifact';old=os.umask(0)
+            try:ocr.private_write(path,b'fictional')
+            finally:os.umask(old)
+            self.assertEqual(path.stat().st_mode&0o777,0o600)
+            with self.assertRaises(FileExistsError):ocr.private_write(path,b'changed')
+            link=Path(td)/'link';link.symlink_to(path)
+            with self.assertRaises(FileExistsError):ocr.private_write(link,b'changed')
+            self.assertEqual(path.read_bytes(),b'fictional')
     def test_contiguous_same_line_only(self):
         raw=tsv([(1,1,0,'90','Alice'),(1,2,25,'80','Sample')]);c=ocr.candidates(raw,['ALICE SAMPLE'],0,100,100);self.assertEqual(len(c),1);self.assertEqual(c[0]['box'],{'x':0,'y':10,'width':45,'height':10})
         self.assertEqual(ocr.candidates(tsv([(1,1,0,'90','Alice'),(2,1,25,'80','Sample')]),['Alice Sample'],0,100,100),[])
