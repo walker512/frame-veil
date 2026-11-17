@@ -8,7 +8,7 @@ The original editing modes are manual. Version 0.4.0 adds explicit-region OCR wi
 
 ## Explicit-region OCR: a concrete missed-notice fix
 
-The old public gray-notification example missed `NOTICE DEMO ONLY`. The new [region workflow](docs/REGION_OCR.md) lets you explicitly select an area and scale it before OCR, retains the original full-frame name hits, and verifies derived pixels and mapped boxes offline. Optional thresholds can also make recognition worse; zero hits never clear privacy. Human decisions and whole-output review remain required. No API, downloads or bundled media/font/model are needed.
+The old public gray-notification example missed `NOTICE DEMO ONLY`. The new [region workflow](docs/REGION_OCR.md) lets you explicitly select an area and scale it before OCR, retains the original full-frame name hits, and verifies derived pixels and mapped boxes offline. Optional thresholds can also make recognition worse; opt-in `--pair-unthresholded` retains a raw-crop control and actual evidence rather than discarding the failed variant. The offline `coverage` command shows unsampled intervals and per-term matches. Zero hits never clear privacy. Human decisions and whole-output review remain required. No API, downloads or bundled media/font/model are needed.
 
 ## Requirements and supported media
 
