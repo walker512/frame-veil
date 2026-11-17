@@ -4,7 +4,11 @@
 
 For an authorized screen recording, bind a manual rectangle plan to the source hash, render real lossless video, check frame/stream properties and export a decoded review frame. The original recording is never overwritten or included in the result bundle.
 
-The original editing modes are manual. Version 0.3.0 adds optional explicit-word OCR candidates on selected frames, not complete automatic privacy detection or a visual editing workbench. It does not discover all names, passwords, faces, spoken information, notifications or unmarked privacy risks. **Human review of the whole output remains mandatory.**
+The original editing modes are manual. Version 0.4.0 adds explicit-region OCR with reproducible crop/resize evidence, retaining the 0.3 explicit-word candidates on selected frames, not complete automatic privacy detection or a visual editing workbench. It does not discover all names, passwords, faces, spoken information, notifications or unmarked privacy risks. **Human review of the whole output remains mandatory.**
+
+## Explicit-region OCR: a concrete missed-notice fix
+
+The old public gray-notification example missed `NOTICE DEMO ONLY`. The new [region workflow](docs/REGION_OCR.md) lets you explicitly select an area and scale it before OCR, retains the original full-frame name hits, and verifies derived pixels and mapped boxes offline. Optional thresholds can also make recognition worse; zero hits never clear privacy. Human decisions and whole-output review remain required. No API, downloads or bundled media/font/model are needed.
 
 ## Requirements and supported media
 

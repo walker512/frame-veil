@@ -3,12 +3,13 @@ requires = ["setuptools>=65"]
 build-backend = "setuptools.build_meta"
 [project]
 name = "frame-veil"
-version = "0.3.0"
+version = "0.4.0"
 description = "Manual frame-bound masking and explicit sample-range audio muting"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "walker512"}]
 [project.scripts]
 frame-veil = "frame_veil.__main__:main"
+frame-veil-regions = "frame_veil.region_ocr:main"
 [tool.setuptools.packages.find]
 include = ["frame_veil*"]
