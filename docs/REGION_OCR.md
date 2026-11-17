@@ -168,3 +168,53 @@ then 4 declared masks on 2 of 6 decoded frames. The actual output pixel audit
 checked 26,424 rectangle pixels including overlap and found all declared pixels
 opaque. The whole-output human review record remained pending. These are synthetic
 fixture observations, not real-world recall measurements or publication consent.
+
+## Paired threshold controls and sampling coverage (0.5.0)
+
+Opt in when trying a threshold on an explicitly selected crop:
+
+```sh
+python -m frame_veil.region_ocr scan demo/synthetic.mp4 --terms demo/terms.json --frames demo/frames.json --regions demo/regions.json --pair-unthresholded --out paired-scan
+python -m frame_veil.region_ocr coverage paired-scan
+# Legacy selected-frame scan bundles also support:
+python -m frame_veil.ocr coverage original-scan
+```
+
+For each thresholded region, `--pair-unthresholded` retains the configured variant
+and adds an unthresholded crop at the **same coordinates and scale**, unless such
+a control already exists. Generated controls have unique `control-N` IDs. It
+does not infer new areas, frame intervals, language, text or masks. The expanded
+`regions.json` retains every requested variant's values and identifies the
+controls; the input config is not modified. Each variant's actual derived PPM,
+TSV and candidate evidence is stored and independently revalidated by the existing
+offline verifier. Matching controls are reused; duplicated-looking actual matches
+are retained with origin IDs, not silently merged.
+
+The same 8-region, 64-execution and pixel/TSV budgets still apply **after**
+expansion. If controls exceed a budget, the workflow rejects the request, rather
+than omitting evidence. This opt-in costs additional OCR calls and storage.
+Existing scan behavior without the flag is unchanged.
+
+In the original fictional gray-notice fixture, threshold 180 erases the notice:
+both selected frames have no notice matches in the threshold-only path. Paired
+controls recover the requested notice on those two frames while retaining the
+original name hits and failed-threshold evidence. This is one measured
+failure-mode mitigation, **not a real-world recall benchmark**. It cannot recover
+text absent from the original pixels, unrequested words, unselected frames,
+unsupported language or all other OCR misses. No new OCR model is downloaded.
+
+`coverage` first verifies the entire stored bundle without rerunning OCR, then
+reports sampled frame indices, unsampled half-open ranges and, for each requested
+term index, sampled frames with and without an exact match. Region output
+separates baseline and each region variant. It deliberately omits raw search
+phrases, OCR text and file paths from stdout; sampling indices and counts may
+still be sensitive. This is sampling coverage, **not a privacy-detection score**.
+Even every frame sampled with matches is not a safety certificate. Frames without
+a match can contain missed text; every frame still needs human review.
+
+Local validation of this increment: 116 tests passed, zero skips; after expanding
+the low-contrast fixture assertion, the final 24 region tests passed again. The
+paired path also recovered the requested notice in the separate pale-background,
+gray-text fixture that threshold 110 alone lost. Both observations use fictional
+English text, installed Tesseract and real decoded pixels. The prior known-negative
+threshold-only tests remain, rather than being removed to inflate success.
