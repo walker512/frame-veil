@@ -65,6 +65,16 @@ def scan_paired(source, terms_path, frames_path, regions_path, out):
         ocr.private_write(config, core.canonical(expanded))
         return scan(source, terms_path, frames_path, config, out)
 
+def scan_interval(source, terms_path, start, end, regions_path, out, pair_unthresholded=False):
+    indexes = ocr.interval_indices(start, end)
+    rs = paired_regions(core.read(regions_path)) if pair_unthresholded else regions(core.read(regions_path))
+    if len(indexes) * (1 + len(rs)) > MAX_CALLS:
+        raise Invalid('Interval scan exceeds 64 OCR executions.')
+    with tempfile.TemporaryDirectory(prefix='frame-region-interval-') as td:
+        frames = Path(td) / 'frames.json'; ocr.private_write(frames, core.canonical(indexes))
+        config = Path(td) / 'regions.json'; ocr.private_write(config, core.canonical(rs))
+        return scan(source, terms_path, frames, config, out)
+
 def budget(rs, indexes, info):
     if len(indexes) * (1 + len(rs)) > MAX_CALLS:
         raise Invalid('Baseline plus region OCR exceeds 64 executions.')
@@ -232,7 +242,10 @@ def plan(source, folder, decision_path, out):
 def main():
     p = argparse.ArgumentParser(description=SCOPE); sub = p.add_subparsers(dest='cmd', required=True)
     a = sub.add_parser('scan'); a.add_argument('source')
-    for arg in ('terms', 'frames', 'regions', 'out'): a.add_argument('--' + arg, required=True)
+    for arg in ('terms', 'regions', 'out'): a.add_argument('--' + arg, required=True)
+    g = a.add_mutually_exclusive_group(required=True)
+    g.add_argument('--frames')
+    g.add_argument('--frame-range', nargs=2, type=int, metavar=('START', 'END'), help='Every frame in [START,END), at most 24 and 64 OCR calls; human review still required.')
     a.add_argument('--pair-unthresholded', action='store_true', help='Retain an unthresholded control for each thresholded crop/scale; bounds still apply.')
     a = sub.add_parser('verify'); a.add_argument('scan')
     a = sub.add_parser('coverage'); a.add_argument('scan')
@@ -241,8 +254,11 @@ def main():
     args = p.parse_args()
     try:
         if args.cmd == 'scan':
-            runner = scan_paired if args.pair_unthresholded else scan
-            r = runner(args.source, args.terms, args.frames, args.regions, args.out)
+            if args.frame_range:
+                r = scan_interval(args.source, args.terms, *args.frame_range, args.regions, args.out, args.pair_unthresholded)
+            else:
+                runner = scan_paired if args.pair_unthresholded else scan
+                r = runner(args.source, args.terms, args.frames, args.regions, args.out)
         elif args.cmd == 'coverage': r = coverage(args.scan)
         elif args.cmd == 'prepare': r = prepare(args.scan, args.out)
         elif args.cmd == 'plan': r = plan(args.source, args.scan, args.decisions, args.out)

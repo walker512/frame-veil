@@ -64,6 +64,18 @@ def indices(raw,total=None):
     if d!=sorted(set(d)):raise Invalid('Frame indexes must be sorted and unique.')
     return d
 
+def interval_indices(start, end):
+    """Enumerate every frame in an explicit bounded half-open interval."""
+    core.integer(start,0,1799);core.integer(end,1,1800)
+    if not start<end or end-start>24:raise Invalid('Explicit interval must contain 1..24 consecutive frames.')
+    return list(range(start,end))
+
+def scan_interval(source,terms_path,start,end,out):
+    indexes=interval_indices(start,end)
+    with tempfile.TemporaryDirectory(prefix='frame-interval-') as td:
+        frames=Path(td)/'frames.json';private_write(frames,dump(indexes))
+        return scan(source,terms_path,frames,out)
+
 def probe(path):
     raw,_=bounded_tool('ffprobe',['-v','error',*core.input_options('mov'),'-count_frames','-show_entries','stream=codec_type,codec_name,width,height,nb_read_frames,sample_aspect_ratio:stream_side_data=rotation:stream_tags=rotate','-of','json',str(path)],262144,120,strict_stderr=True)
     try:
@@ -273,12 +285,13 @@ def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0
 
 def main():
     p=argparse.ArgumentParser(description='Local explicit English OCR candidates on selected frames; never a privacy clearance.')
-    sub=p.add_subparsers(dest='cmd',required=True);a=sub.add_parser('scan');a.add_argument('source');a.add_argument('--terms',required=True);a.add_argument('--frames',required=True);a.add_argument('--out',required=True)
+    sub=p.add_subparsers(dest='cmd',required=True);a=sub.add_parser('scan');a.add_argument('source');a.add_argument('--terms',required=True);g=a.add_mutually_exclusive_group(required=True);g.add_argument('--frames');g.add_argument('--frame-range',nargs=2,type=int,metavar=('START','END'),help='Every frame in [START,END), at most 24; not a privacy guarantee.');a.add_argument('--out',required=True)
     a=sub.add_parser('verify');a.add_argument('scan');a=sub.add_parser('coverage');a.add_argument('scan');a=sub.add_parser('prepare');a.add_argument('scan');a.add_argument('--out',required=True)
     a=sub.add_parser('plan');a.add_argument('source');a.add_argument('scan');a.add_argument('decisions');a.add_argument('--out',required=True)
     args=p.parse_args()
     try:
-        if args.cmd=='scan':r=scan(args.source,args.terms,args.frames,args.out)
+        if args.cmd=='scan':
+            r=scan_interval(args.source,args.terms,*args.frame_range,args.out) if args.frame_range else scan(args.source,args.terms,args.frames,args.out)
         elif args.cmd=='coverage':r=coverage(args.scan)
         elif args.cmd=='prepare':r=prepare(args.scan,args.out)
         elif args.cmd=='plan':r=plan(args.source,args.scan,args.decisions,args.out)
