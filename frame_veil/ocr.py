@@ -9,6 +9,10 @@ TSV_LIMIT=1024*1024
 SCOPE='Selected-frame text candidates only. Not complete privacy detection, proof of viewing or publication consent.'
 def sha(b):return hashlib.sha256(b).hexdigest()
 def dump(d):return core.canonical(d)
+def private_write(path, raw):
+    """Create a new owner-only artifact without an initially public chmod window."""
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600)
+    with os.fdopen(fd,'wb') as f:f.write(raw)
 def bounded_tool(tool,args,cap,timeout=30,sink=None,strict_stderr=False):
     if os.name!='posix':raise Invalid('OCR subprocess workflow requires POSIX.')
     stdout=bytearray();stderr=bytearray();count=0;deadline=time.monotonic()+timeout
@@ -127,7 +131,7 @@ def scan(source,terms_path,frames_path,out):
     tr=core.read(terms_path);fr=core.read(frames_path);phrases=terms(tr);indexes=indices(fr);src=core.read(source,core.MAX_SOURCE,False)
     files={'terms.json':tr,'frames.json':fr};matches=[];versions={}
     with tempfile.TemporaryDirectory(prefix='frame-ocr-') as td:
-        root=Path(td);video=root/'source.mp4';video.write_bytes(src);info=probe(video);indices(fr,info['frames']);w,h=info['width'],info['height'];size=w*h*3
+        root=Path(td);video=root/'source.mp4';private_write(video,src);info=probe(video);indices(fr,info['frames']);w,h=info['width'],info['height'];size=w*h*3
         if size*len(indexes)>MAX_SAMPLES:raise Invalid('Selected RGB frames exceed 64 MiB aggregate budget.')
         for tool,args in (('ffmpeg',['-version']),('ffprobe',['-version']),('tesseract',['--version'])):
             raw,_=bounded_tool(tool,args,16384);lines=raw.decode('utf8').splitlines()
@@ -143,7 +147,7 @@ def scan(source,terms_path,frames_path,out):
             pending.extend(chunk)
             while len(pending)>=size:
                 if position>=len(indexes):raise Invalid('Extra sampled decoded frame.')
-                pn,_=names(indexes[position]);(root/pn).write_bytes(f'P6\n{w} {h}\n255\n'.encode()+bytes(pending[:size]));del pending[:size];position+=1
+                pn,_=names(indexes[position]);private_write(root/pn,f'P6\n{w} {h}\n255\n'.encode()+bytes(pending[:size]));del pending[:size];position+=1
         select='+'.join('eq(n\\,'+str(i)+')' for i in indexes)
         bounded_tool('ffmpeg',['-v','error','-nostdin','-threads','1',*core.input_options('mov'),'-i',str(video),'-map','0:v:0','-an','-sn','-dn','-vf','select='+select,'-fps_mode','passthrough','-threads','1','-pix_fmt','rgb24','-f','rawvideo','pipe:1'],size*len(indexes),120,receive,True)
         if pending or position!=len(indexes):raise Invalid('Incomplete selected-frame decode.')
@@ -159,8 +163,8 @@ def scan(source,terms_path,frames_path,out):
     files['manifest.json']=dump(manifest)
     # Snapshot/TSV/metadata all validate before publishing any source-derived artifact.
     validate_files(files)
-    Path(out).mkdir(exist_ok=False)
-    for n,b in files.items():(Path(out)/n).write_bytes(b)
+    Path(out).mkdir(mode=0o700,exist_ok=False)
+    for n,b in files.items():private_write(Path(out)/n,b)
     return {'scan_completed':True,'sampled_frames':len(indexes),'total_frames':info['frames'],'candidate_count':len(matches),'privacy_complete':False,'manual_review_required':True}
 
 def validate_files(files):
@@ -213,7 +217,7 @@ def load_scan(folder):
 def prepare(folder,out):
     files,m,found=load_scan(folder)
     d={'schema':1,'scan_manifest_sha256':sha(files['manifest.json']),'source_sha256':m['source_sha256'],'decisions':[{'id':c['id'],'decision':'pending','note':'','mask':None} for c in found]}
-    with Path(out).open('xb') as f:f.write(dump(d))
+    private_write(out,dump(d))
     return {'candidates':len(found),'all_pending':True,'privacy_complete':False}
 
 def plan(source,folder,decision_path,out):
@@ -221,7 +225,7 @@ def plan(source,folder,decision_path,out):
     files,m,found=load_scan(folder)
     return plan_from_evidence(source,files,m,found,decision_path,out)
 
-def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0o777):
+def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0o700):
     if Path(out).exists() or Path(out).is_symlink():raise Invalid('Output must be new.')
     dr=core.read(decision_path);d=core.parse(dr);core.fields(d,('schema','scan_manifest_sha256','source_sha256','decisions'));core.integer(d['schema'],1,1)
     if d['scan_manifest_sha256']!=sha(files['manifest.json']) or d['source_sha256']!=m['source_sha256'] or sha(core.read(source,core.MAX_SOURCE,False))!=m['source_sha256']:raise Invalid('Decisions/source/scan binding mismatch.')
@@ -240,8 +244,8 @@ def plan_from_evidence(source,files,m,found,decision_path,out,scope=SCOPE,mode=0
     if not masks:raise Invalid('No accepted masks; zero candidates/accepts is not a privacy clearance. Use manual workflow.')
     p={'schema':1,'source_sha256':m['source_sha256'],**{k:info[k] for k in ('width','height','frames')},'masks':masks};pr=dump(p);core.load_plan(pr,info)
     receipt={'schema':1,'source_sha256':m['source_sha256'],'scan_manifest_sha256':sha(files['manifest.json']),'decisions_sha256':sha(dr),'plan_sha256':sha(pr),'scope':scope,'manual_interval_declarations':True}
-    Path(out).mkdir(mode=mode,exist_ok=False)
-    for n,b in {'plan.json':pr,'decisions.json':dr,'receipt.json':dump(receipt)}.items():(Path(out)/n).write_bytes(b)
+    Path(out).mkdir(mode=mode & 0o700,exist_ok=False)
+    for n,b in {'plan.json':pr,'decisions.json':dr,'receipt.json':dump(receipt)}.items():private_write(Path(out)/n,b)
     return {'plan_created':True,'masks':len(masks),'privacy_complete':False,'manual_full_output_review_required':True}
 
 def main():

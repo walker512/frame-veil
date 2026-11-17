@@ -142,7 +142,7 @@ def publish(files, out):
     # non-verifying directory; never overwrite or silently remove user files.
     root = Path(out); root.mkdir(mode=0o700, exist_ok=False)
     for n, raw in files.items():
-        with (root / n).open('xb') as f: f.write(raw)
+        ocr.private_write(root / n, raw)
 
 def scan(source, terms_path, frames_path, regions_path, out):
     if Path(out).exists() or Path(out).is_symlink(): raise Invalid('Output must be new.')
@@ -158,7 +158,7 @@ def scan(source, terms_path, frames_path, regions_path, out):
         for i in indexes:
             for j, r in enumerate(rs):
                 pn, tn = names(i, j); image = preprocess(bf[ocr.names(i)[0]], info['width'], info['height'], r)
-                path = root / pn; path.write_bytes(image)
+                path = root / pn; ocr.private_write(path, image)
                 tsv, diag = ocr.bounded_tool('tesseract', [str(path), 'stdout', '-l', 'eng', '--oem', '1', '--psm', '6', 'tsv'], ocr.TSV_LIMIT, 30)
                 tsv_bytes += len(tsv)
                 if tsv_bytes > MAX_TSV: raise Invalid('Aggregate TSV size exceeded.')
@@ -178,8 +178,7 @@ def prepare(folder, out):
     files, m, found = load_scan(folder)
     d = {'schema': 1, 'scan_manifest_sha256': ocr.sha(files['manifest.json']), 'source_sha256': m['source_sha256'],
          'decisions': [{'id': c['id'], 'decision': 'pending', 'note': '', 'mask': None} for c in found]}
-    fd = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_BINARY', 0), 0o600)
-    with os.fdopen(fd, 'wb') as f: f.write(core.canonical(d))
+    ocr.private_write(out, core.canonical(d))
     return {'candidates': len(found), 'all_pending': True, 'privacy_complete': False}
 
 def plan(source, folder, decision_path, out):
