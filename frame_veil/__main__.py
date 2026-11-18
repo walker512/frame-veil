@@ -7,7 +7,8 @@ def main():
     p=argparse.ArgumentParser(description='Manual frame masks; default render removes ALL audio, optional explicit sample muting. Trusted FFmpeg required.')
     sub=p.add_subparsers(dest='command',required=True)
     a=sub.add_parser('inspect');a.add_argument('source')
-    a=sub.add_parser('render');a.add_argument('source');a.add_argument('plan');a.add_argument('--out',required=True)
+    a=sub.add_parser('render');a.add_argument('source');a.add_argument('plan');a.add_argument('--out',required=True);a.add_argument('--staged',action='store_true')
+    a=sub.add_parser('publish-render');a.add_argument('folder');a.add_argument('--out',required=True)
     a=sub.add_parser('verify');a.add_argument('folder')
     a=sub.add_parser('audit-masks');a.add_argument('folder')
     a=sub.add_parser('frame');a.add_argument('folder');a.add_argument('--index',type=int,required=True);a.add_argument('--out',required=True)
@@ -20,7 +21,14 @@ def main():
     args=p.parse_args()
     try:
         if args.command=='inspect':r=inspect(args.source)
-        elif args.command=='render':r=render(args.source,args.plan,args.out)
+        elif args.command=='render':
+            if args.staged:
+                from .publication import render_staged
+                r=render_staged(args.source,args.plan,args.out)
+            else:r=render(args.source,args.plan,args.out)
+        elif args.command=='publish-render':
+            from .publication import publish_render
+            r=publish_render(args.folder,args.out)
         elif args.command=='verify':r=verify(args.folder)
         elif args.command=='audit-masks':r=audit_masks(args.folder)
         elif args.command=='audio-inspect':r=inspect_audio(args.source)

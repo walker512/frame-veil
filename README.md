@@ -256,3 +256,14 @@ with cancellation-safe direct-child ownership and POSIX process-group cleanup.
 See [process limits and Windows boundaries](docs/PROCESS_LIMITS.md). Windows legacy
 media paths remain available, but native Windows QA and descendant-tree termination
 are not claimed. Signal-managed cancellation requires the main thread; no decoder sandbox is implied.
+
+## Optional staged publication for silent renders
+
+`render ... --staged` prepares and verifies a complete private sibling bundle
+before no-replace publication. `publish-render STAGED_BUNDLE --out FINAL` retries
+a complete stage without rendering again. Partial stages are retained and require
+fresh rendering; nothing is recursively cleaned up. **Default output commands
+remain nontransactional**, including audio and review export. See
+[staging, platform capabilities and recovery limits](docs/STAGED_PUBLICATION.md).
+This is not power-loss durability, hostile same-account isolation or privacy
+certification. Windows native behavior and ACLs remain untested for this addition.
