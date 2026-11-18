@@ -1,28 +1,44 @@
 # Frame Veil
 
-**Make a separately reviewable recording copy with exact frame-bound opaque masks. Default render removes all audio; an explicit sample-muting path can preserve reviewed narration.**
+**Create a separately reviewable recording copy with frame-bound opaque masks and explicit audio handling.**
 
-For an authorized screen recording, bind a manual rectangle plan to the source hash, render real lossless video, check frame/stream properties and export a decoded review frame. The original recording is never overwritten or included in the result bundle.
+Frame Veil is a local CLI for recordings you are authorized to process. Bind a manual mask plan to the exact source, render a new copy, inspect the result, and record human review before an optional guarded export. The original recording is never overwritten or included in the result bundle.
 
-The original editing modes are manual. Version 0.4.0 adds explicit-region OCR with reproducible crop/resize evidence, retaining the 0.3 explicit-word candidates on selected frames, not complete automatic privacy detection or a visual editing workbench. It does not discover all names, passwords, faces, spoken information, notifications or unmarked privacy risks. **Human review of the whole output remains mandatory.**
+**This is not automatic privacy clearance or an interactive editing workstation.** There is no built-in video player, box-drawing UI or motion tracker. Use a trusted external player to watch and listen to the entire processed recording. Successful commands, OCR results and completed checklists do not grant publication consent.
 
-## Explicit-region OCR: a concrete missed-notice fix
+## Current capabilities
 
-The old public gray-notification example missed `NOTICE DEMO ONLY`. The new [region workflow](docs/REGION_OCR.md) lets you explicitly select an area and scale it before OCR, retains the original full-frame name hits, and verifies derived pixels and mapped boxes offline. Optional thresholds can also make recognition worse; opt-in `--pair-unthresholded` retains a raw-crop control and actual evidence rather than discarding the failed variant. The offline `coverage` command shows unsampled intervals and per-term matches. An explicit `--frame-range START END` scans every frame of a short, bounded interval for a closer second pass, without automatic tracking or inferred mask durations. Zero hits never clear privacy. Human decisions and whole-output review remain required. No API, downloads or bundled media/font/model are needed.
+| Workflow | What it does | Boundary |
+| --- | --- | --- |
+| Manual masking | Opaque black rectangles over exact decoded-frame intervals; lossless video output | Unmarked pixels remain visible; no blur or automatic tracking |
+| Audio handling | Default render removes all audio; optional sample-range muting preserves reviewed narration | Unmarked speech can remain sensitive |
+| Mask/sample audit | Decodes actual output to check declared masks and mute intervals | Checks the plan, not whether all private material was identified |
+| OCR assistance | Explicit words, selected frames, regions and optional crop/resize controls | Installed English Tesseract; missed text and unsampled frames are not clearance |
+| Bounded batch collection | Resume source-bound OCR chunks and compose explicitly reviewed region plans | No automatic mask-duration extension or unlimited-length video |
+| Human-review CLI | Pending/reviewed/blocked checks bound to exact bundle bytes; guarded local export | Declarations, not proof of watching or authenticated approval |
+| Staged silent render | Verify a complete stage before no-replace publication; retry a complete stage without re-encoding | Opt-in, platform-dependent; not audio/review staging or power-loss durability |
 
-## Requirements and supported media
+See [historical changes](CHANGELOG.md) for the development sequence and older test counts. These are cumulative capabilities of the public source, not separate package-registry release claims.
 
-- Python 3.11+ and a trusted local `ffmpeg`/`ffprobe` installation on `PATH`.
-- Source: a local MP4/MOV container with exactly one **H.264** video, square pixels and no nonzero rotation metadata. At most **64 total streams** are accepted, including the video and every audio/subtitle/data/attachment stream; inspect, render and receipt verification use the same bound.
-- Source file up to 64 MiB; width 2–1920, height 2–1080; 1–1,800 decoded video frames. Dimensions are pixel coordinates, not screen CSS coordinates.
-- Output: lossless **FFV1, BGR0, Matroska `.mkv`**, up to 256 MiB. Use a player/editor that supports FFV1, such as a suitable local media application. This is not a browser-compatible MP4 export guarantee.
-- Every subprocess has a 120-second deadline. Large or difficult media may exceed it and fail. The input-size limit is not a decoder memory sandbox.
+## Requirements
 
-No FFmpeg binary or third-party codec library is bundled. FFmpeg and its enabled codecs have their own licenses. This release has been exercised with FFmpeg 7.1.5 on Linux; no broader version/platform matrix is claimed.
+- Python **3.11+**, with trusted local `ffmpeg` and `ffprobe` on `PATH`.
+- Optional OCR: trusted local Tesseract with English data. No binary, font, model or third-party media is bundled.
+- Source: local MP4/MOV, exactly one H.264 video, square pixels, no nonzero rotation metadata, at most 64 total streams.
+- Limits: 64 MiB source, dimensions 2–1920 × 2–1080, and 1–1,800 decoded frames. Individual OCR operations have additional bounds documented below.
+- Default output: FFV1/BGR0 video in Matroska (`.mkv`), at most 256 MiB. Use a compatible local player; browser-compatible MP4 playback is not promised.
 
-## Try an entirely synthetic example
+From a source checkout, commands can run with `python -m frame_veil`. Optional installation:
 
-From the source checkout:
+```sh
+python -m pip install .
+```
+
+This installs `frame-veil`, `frame-veil-regions` and `frame-veil-merge`. Building requires setuptools and may access your configured package source. Processing itself makes no network requests. FFmpeg/codecs and Tesseract retain their own licensing requirements.
+
+## First run: synthetic media only
+
+From the source checkout, using fresh output paths:
 
 ```sh
 python -m examples.synthetic demo
@@ -31,19 +47,14 @@ python -m frame_veil render demo/synthetic.mp4 demo/plan.json --out redacted-dem
 python -m frame_veil verify redacted-demo
 python -m frame_veil audit-masks redacted-demo
 python -m frame_veil frame redacted-demo --index 4 --out frame-review
-python -m unittest discover -s tests -v
 ```
 
-The generator creates an original two-second red video and a 440 Hz tone. Its plan masks two overlapping rectangles at different frame intervals. The real render preserves ten frames and removes the audio track. Open `frame-review/review-frame.png` to inspect the two black rectangles on frame 4.
+The original example generates a two-second red video and a 440 Hz tone. Rendering preserves ten frames, masks two rectangles over different intervals and removes the audio. Inspect `frame-review/review-frame.png`, then watch `redacted-demo/redacted.mkv` in a compatible player. The example generator is available from the checkout, not as an installed command.
 
-All output directories must be new. You can install the package with `python -m pip install .`, then use `frame-veil` instead of `python -m frame_veil`. Setuptools is required for the build. The `examples` module is run from the source checkout, not installed as a command. No package-registry release is implied.
+## Your recording: inspect → plan → render → review
 
-## Work on your own authorized recording
-
-1. Keep the original private and backed up. Use this only on media you are authorized to process.
-2. Run `inspect SOURCE.mp4`. It returns width, height, decoded frame count and SHA-256, not source tags or filenames.
-3. Using your own trusted video viewer/editor, identify the exact decoded frame ranges and pixel rectangles. There is no built-in box-drawing UI or face/motion tracker. Optional OCR candidates can assist with explicitly requested words on selected frames; they do not replace full viewing. Do not assume a secret stays at a fixed location after scrolling or animation.
-4. Write a plan using the exact hash and dimensions from inspect:
+1. Keep a private backup and run `inspect SOURCE.mp4` to obtain its SHA-256, dimensions and decoded-frame count.
+2. In a trusted external viewer, identify the exact rectangles and frame intervals. Write a plan:
 
 ```json
 {
@@ -58,212 +69,63 @@ All output directories must be new. You can install the package with `python -m 
 }
 ```
 
-The placeholder hash deliberately is not valid; do not use it unchanged. A plan for any other source bytes is rejected. Changing a recording, even metadata, requires inspecting and reviewing a new plan.
+The placeholder is intentionally invalid. Replace all source properties with the inspected values. Frames are zero-based decoded-frame indices, **not timestamps**. Intervals include the start and exclude the end. Coordinates are integer source pixels; 1–100 masks are accepted and overlap is allowed. Changing source bytes requires a new source-bound plan.
 
-5. Run `render SOURCE.mp4 PLAN.json --out NEW_DIRECTORY`. This makes a **new video copy**, never changes the source, and removes **all** audio, subtitles, data/attachment streams and chapters from the output mapping. For a supported single-track recording where narration matters, use the separate opt-in [selective audio workflow](docs/SELECTIVE_AUDIO.md). The default command still retains no audio.
-6. Verify the result, then manually watch the entire redacted copy in a supporting player. Inspect frames around every mask boundary. `frame RESULT --index N --out NEW_DIRECTORY` extracts only from the processed copy, not the original.
-
-`inspect`, `render`, `verify` and `frame` exit 0 on their documented operation completing, 2 on invalid/unsupported input, mismatch, timeout, unavailable tools or I/O failure. **Exit 0 does not mean the video is safe to publish.**
-
-## Exact mask semantics
-
-- Frames are indexed from zero in decoded video order. `[start_frame, end_frame)` includes the start and excludes the end. These numbers are **not timestamps, milliseconds or seconds**.
-- Rectangles use integer pixels: `[x, x + width)` by `[y, y + height)` within the encoded, unrotated square-pixel frame.
-- There may be 1–100 masks. Overlap is allowed; the union becomes opaque black. No blur, mosaic or transparency is used.
-- All interpolated filter values are strictly validated integers. Plans cannot supply FFmpeg expressions, commands, URLs, file references or arbitrary filters.
-- The renderer resets the first output video timestamp to zero and requests passthrough frame timing. It checks decoded frame count and dimensions after encoding. It does not claim timestamp identity with every source/container convention; variable-frame-rate and unusual edit-list playback have not been separately validated.
-- Rotated media and non-square-pixel media must be normalized using a separate trusted workflow **before** inspect/plan creation. Do not reuse coordinates from an earlier version.
-
-There is no automatic padding or motion tracking. Choose an appropriately generous region and frame interval, then verify it visually. Sensitive pixels outside your rectangles are intentionally preserved and may remain visible. Anything inside unmasked frames remains visible. A black rectangle is not automatic identity anonymization.
-
-## Default render output and verification
-
-A successful default `render` result directory contains exactly (the optional audio-render layout is documented separately):
-
-- `redacted.mkv`: rendered lossless video with one video stream and no audio.
-- `plan.json`: the supplied plan bytes.
-- `receipt.json`: source/plan/output hashes, numerical input/output properties, stream-type summary and explicit manual-review requirement.
-
-No source video, original audio, user filename/path or copied source metadata text is included. Global and video-stream metadata copying are disabled, as are chapters; FFmpeg/Matroska may create technical encoder/container metadata of its own. This is not a forensic metadata-erasure certification.
-
-`verify` checks the receipt structure and hashes, actually decodes/counts output video frames, confirms expected dimensions/codec and a single video-only stream, and revalidates the bound plan. It **does not** reopen the original source or rerender the masks, nor prove that the rectangles are adequate or actually match every intended private region. The test suite validates the renderer on synthetic pixels; bundle verification itself is a consistency check, not independent pixel-level privacy certification. A coordinated replacement of plan, video and receipt can pass; use a trusted external signature/hash when provenance matters.
-
-## Local-processing safety
-
-No network request, upload, telemetry or application credential is used. The media is read from an explicitly supplied bounded regular file into a private temporary snapshot. Source URLs, symlink leaves and special files are rejected. FFmpeg is restricted to explicit MOV/Matroska demuxers with `file,pipe` protocols; MOV external data references and absolute-path aliases are disabled. Do not treat this as a sandbox for a malicious FFmpeg build, hostile parent-directory replacement or untrusted decoder vulnerabilities. Keep FFmpeg updated and process untrusted media in an appropriate isolated environment.
-
-Plans are bounded UTF-8 JSON; duplicate keys, excessive depth, malformed Unicode, floats, booleans as integers, out-of-frame rectangles and mismatched source hashes are rejected. Media-tool error text is not echoed, because it could include private paths or metadata. Every render/probe must exit successfully without error-level diagnostics. Generated outputs are checked before result publication; an I/O failure while writing the final directory can still leave a partial result. A partial directory is not a completed render. Existing output directories are not overwritten.
-
-Temporary snapshots are cleaned up by the temporary-directory mechanism after use; this is not a secure disk wipe guarantee. The resulting video and preview frames may **still contain unmarked private material**. Keep them local until reviewed. Source hashes and mask positions can also be sensitive. No private vulnerability-reporting destination is designated; do not put private recordings or secrets into public issues.
-
-## Existing tools and honest scope
-
-- [OpenScrub](https://github.com/austinmabry/OpenScrub) documents a considerably broader visual workflow, face/text detection, manual box editing and audio spans. Prefer it when those capabilities are needed.
-- [simple-redact-video-tool](https://github.com/cclawton/simple-redact-video-tool) provides a local visual region/time-range editing workflow with FFmpeg.
-- [deface](https://github.com/ORB-HD/deface) focuses on detected-face anonymization and audio removal.
-- [FFmpeg filters](https://www.ffmpeg.org/ffmpeg-filters.html) provide the underlying opaque drawing/timeline machinery; this is not a new redaction algorithm.
-
-Primary documentation was reviewed; those product runtimes were not compared. There is no claim of novelty, better detection, superior editing UX or privacy certification. The delivered value is a source-bound, explicit frame-mask plan, real lossless render, default all-audio removal and testable artifact-check workflow. It is a narrow manual processing core, not a replacement for those full workbenches.
-
-## Validation
-
-Original 0.1.0 release: 24 public tests executed on Linux/Python 3.12 with FFmpeg 7.1.5. The real-media tests generate original synthetic video+tone, render it, decode all ten source and output frames to RGB, and compare **every pixel** against the expected union of masks. Unmasked pixels remain equal in this fixture. Actual audio removal, source-title/stream-tag removal, PNG extraction, source-binding failure, receipt/file tampering and CLI calls are also tested. Real 64-stream input (one video plus 63 AAC tracks) renders and self-verifies; 65-stream input is rejected by inspect and render before output creation.
-
-No Windows/macOS, hosted CI, browser playback, real lecture recording, HDR/color-managed workflow, variable-frame-rate corpus or adversarial decoder corpus was tested. Real-media tests explicitly skip if FFmpeg is unavailable; skips are not passes. The synthetic preview frame was inspected locally; that is not validation of a user's recording.
-
-MIT license, original code and synthetic generator by walker512. No real course footage, student data, personal voice recording or upstream competitor source is included.
-
-
-## Independently audit the rendered masks
-
-`python -m frame_veil audit-masks OUTPUT_BUNDLE` first performs the existing byte/stream checks, then decodes the actual lossless output and checks **every RGB channel of every pixel in every declared rectangle, on every declared frame**. It does not trust a matching receipt alone. A re-encoded output with a nonblack pixel inside a mask is rejected even if someone recomputes its receipt hash.
-
-Success reports `declared_masks_opaque: true`, decoded/marked frame counts and rectangle-pixel checks (overlapping rectangles count again). Audio absence is checked through the verified output stream list. The command decodes one RGB frame at a time rather than holding the entire raw recording in memory; the existing bounded compressed-file snapshot still occupies memory. A 120-second watchdog kills a stalled decoder, and incomplete/extra decoded data, decoder errors and timeout do not produce success. A large recording can exceed this time budget. This is not an OS/FFmpeg sandbox or a guarantee against uninterruptible filesystem/kernel operations.
-
-On a detected nonblack pixel, the command exits **3** and reports the first zero-based `frame_index`, `mask_index` in the supplied plan, and `pixel_row`. It stops there (`audit_completed: false`), so inspect/re-render the plan and audit again; do not infer the rest of the output passed. Exit **2** means the audit could not be completed because of input/structure/decoder/timeout errors. Only exit **0** with the positive result represents a completed declared-mask audit. Pixel values, media content, filenames and decoder diagnostic text are not included in error output.
-
-`verify` remains the cheaper hash/stream check and does **not** invoke the pixel audit. Its JSON now also exposes the bound `plan_sha256`; other receipt/bundle files are unchanged. `audit-masks` rechecks the plan/video hashes after reading them, then uses private snapshots, so a change between structural verification and rereading is rejected.
-
-**The auditor is not a privacy certificate.** It cannot tell whether you marked all secrets, selected the right frames, supplied the intended source, or changed unmasked parts of the recording. A wholly black video, or a video altered outside the specified masks, can pass this narrow check. A maliciously changed plan is not authenticated. Human review of the entire recording and authorization to publish remain mandatory. This default video-only audit still requires all audio absent. The separate audio-verify command handles explicitly muted audio bundles; automatic visual/speech detection and the complete classroom review interface remain unimplemented.
-
-### Increment verification
-
-Version 0.1.1: 33 public tests passed on Linux/Python 3.12.14 with FFmpeg/ffprobe 7.1.5, zero skips. The nine added tests use original synthetic media and real decoding: successful overlapping masks, a single altered masked pixel with rehashed receipt, a wrong rectangle with rehashed plan/receipt, allowed unmarked/end-exclusive changes, read-after-verify mismatch, real-process timeout, malformed decoder output and actual CLI pass/failure location. Decoder-failure unit cases substitute a controlled Python child process; they are not evidence about arbitrary FFmpeg failures. No new Windows/macOS or browser validation and no real private recording was used.
-
-
-## Optional selective audio muting (0.2.0)
-
-[Selective audio](docs/SELECTIVE_AUDIO.md) binds manual sample intervals to the same source as the frame masks, preserves normalized PCM outside those intervals, and produces a listenable WAV plus the combined recording. Its verifier checks the final audio samples and the actual combined video masks. Default all-audio removal remains unchanged. Real synthetic mono/stereo tests exercise the whole flow; unmarked speech remains private until you review it.
-
-## Human review before export (0.2.1)
-
-The optional `review-prepare` → `review-decide` → `review-export` CLI workflow requires explicit decisions for every output video segment (text, faces, notifications/other) and retained audio segment. It binds all bundle bytes, rejects stale/missing/blocked decisions, and re-audits the actual media before exporting that exact snapshot. See [the complete local workflow and limits](docs/HUMAN_REVIEW.md). It records declarations, **not proof of viewing, privacy safety or publication consent**; existing render commands remain available. Playback is external, not an accepted interactive workstation.
-
-Local validation for this increment: the public suite includes actual synthetic-media review/export and failure-path tests. No new browser or cross-platform run is claimed.
-
-## Optional explicit-word OCR candidates (0.3.0)
-
-[Local OCR candidates](docs/OCR_CANDIDATES.md) decode explicitly selected frames, run installed English Tesseract, retain private image/TSV evidence, and require explicit human decisions before generating an existing mask plan. Zero matches and unselected frames are never privacy clearance. Full intermediate frames and recognized text are sensitive; nothing is uploaded. The original render/audio/review code and policies remain unchanged. This increment is a CLI workflow, not accepted screenshot/GUI editing or whole-recording recognition.
-
-0.3.0 verification: **88 tests passed, zero skips**, Linux/Python 3.12 with FFmpeg 7.1.5 and Tesseract 5.5.0/English. The original 64 tests and core/audio/review modules are unchanged. A separate real synthetic CLI run detected fictional names, generated explicit one-frame masks, rendered/audited 13,312 rectangle pixels and prepared a still-pending human review. It also missed a notification-like box, as disclosed in the OCR guide. No real student footage, Chinese or GUI acceptance is claimed.
-
-### OCR artifact permissions (0.4.1)
-
-Both selected-frame and explicit-region OCR now create scan and plan directories
-with owner-only POSIX permissions (0700), and their evidence, decision, plan and
-receipt files with 0600 from creation, even under umask 022 or 000. Existing
-artifacts are never overwritten or automatically chmodded. Private scratch images
-also use owner-only file creation. This does not fix copies previously generated
-with broader permissions: keep those in an owner-only directory and review their
-permissions before reuse. These are POSIX mode guarantees, not Windows ACL,
-hostile-parent-directory, administrator-access or complete-video privacy guarantees.
-That 0.4.1 change covered OCR only. The 0.7.1 hardening below also covers manual media and human-review outputs.
-
-## Resumable multi-batch evidence collection (0.7.0)
-
-The [batch workflow](docs/BATCH_OCR.md) can scan an explicit interval in bounded,
-resumable chunks, with read-only disk estimates, source/config binding, verified
-completed/pending ranges and process-interruption recovery. It crosses the
-single-scan 24-frame limit but **retains the source limits of 64 MiB / 1,800
-frames**. It is evidence collection, not automatic mask merging or unrestricted
-long-video redaction. Each run is explicitly bounded and human review remains
-required.
-
-## Private media and human-review outputs (0.7.1)
-
-Manual render bundles, PNG previews, selective-audio bundles (including nested
-video, WAV and combined MKV), human review/decision JSON and reviewed exports now
-use owner-only POSIX directories (0700) and files (0600) from creation. They share
-the same exclusive private-file writer as OCR. Audio publication copies only the
-known bounded file set with private creation, rather than relying on permissions
-being corrected after a directory tree copy. FFmpeg/ffprobe launched through the
-manual media runner get a child-only umask 077, so their scratch output files are
-also private without changing the parent process's umask.
-
-Existing input/output permissions are not automatically changed, and existing
-output leaves are not overwritten. Previously created copies may still have
-broader permissions: review them locally before reuse or sharing. This is a POSIX
-access-mode improvement, not Windows ACL validation, encryption, secure erasure,
-protection from administrators/hostile parent directories, or proof that the
-recording is free of unmarked private content. Even a reviewed export remains
-private by default and is not publication authorization.
-
-Local 0.7.1 validation: 140 tests passed, zero skips. Three new tests exercise
-real render/preview/audio/review/export outputs under umask 022 and 000, check
-tool-created scratch media permissions, preserve the parent umask, and refuse
-existing/symlink review output leaves. Existing decoded-pixel/sample audits and
-all OCR cancellation/resume regressions remain passing. No real private media was
-used; no Windows ACL or broader security certification is claimed.
-
-## Compose reviewed batch plans (0.8.0)
-
-Finishing a batch scan is not the same as producing a complete redacted video.
-Use the new explicit composition step when you have several **region OCR** plans
-already created from accepted/dismissed human decisions. It revalidates the scan
-artifacts, binds each plan to the exact source hash, and reconstructs each plan
-and receipt from its decisions before combining the masks. It never accepts a
-pending decision or auto-extends a rectangle/time interval. Overlapping masks
-are kept in input order, not silently deduplicated or geometrically merged.
-
-Create a local `selection.json` listing the scan and corresponding reviewed plan
-directories. Relative paths resolve from the selection file's directory:
-
-```json
-[
-  {"scan":"batch/chunks/chunk-0000","plan":"reviewed-plan-0000"},
-  {"scan":"batch/chunks/chunk-0003","plan":"reviewed-plan-0003"}
-]
-```
+3. Render into a new directory, then verify and audit:
 
 ```sh
-python -m frame_veil.merge_plans create source.mp4 selection.json --out combined
-python -m frame_veil.merge_plans verify source.mp4 selection.json combined
-python -m frame_veil render source.mp4 combined/plan.json --out redacted
-python -m frame_veil audit-masks redacted
+frame-veil render SOURCE.mp4 PLAN.json --out NEW_BUNDLE
+frame-veil verify NEW_BUNDLE
+frame-veil audit-masks NEW_BUNDLE
 ```
 
-Then use the existing human-review workflow to watch the complete output before
-sharing. The command does not automatically run rendering or approve the result.
-Installed users can also invoke `frame-veil-merge`.
+Default render removes audio, subtitles, data/attachment streams and chapters. Its bundle contains `redacted.mkv`, the exact `plan.json` and `receipt.json`; it does not copy the original recording. Metadata copying is disabled, but technical encoder/container metadata may remain. This is not forensic metadata-erasure certification.
 
-The combined directory contains the render-compatible `plan.json`, exact copies
-of selected plans/decisions/receipts, and `merge-receipt.json`. The receipt lists
-input hashes, source binding, mask index ranges, frames not observed by the
-**selected scans**, and frames without any declared mask. Ranges are zero-based,
-start-inclusive/end-exclusive. A missing-range list is not a list of sensitive
-frames, and an empty list is not a privacy clearance. Observing one region or one
-term does not establish the safety of the rest of a frame.
+`verify` checks structure, hashes and decoded media properties; `audit-masks` checks pixels inside declared masks. Neither establishes complete privacy removal or source authenticity. Even a wholly black video can pass a narrow mask check. Variable-frame-rate/edit-list timing has not been separately validated; frame intervals are not fixed-duration playback segments.
 
-You explicitly choose the inputs: the command cannot infer that every batch was
-included. A scan with no accepted candidates has no mask plan and is not silently
-counted as safe. All selected candidates must have explicit accept/dismiss
-records, but that does not prove a human actually viewed them. Composition
-verification needs the source and selected scan/plan directories; it rereads and
-validates artifacts without rerunning OCR or authenticating historical execution.
-Keep those local inputs if you need to reproduce the check.
+4. Watch the entire output, including unmasked areas and every boundary. For narrated recordings, follow [selective audio muting](docs/SELECTIVE_AUDIO.md), then listen to all retained audio as well.
+5. Optionally use the [human-review and guarded-export CLI](docs/HUMAN_REVIEW.md). It creates all-pending segment checks, requires every category to be reviewed, rejects stale/blocked/missing decisions, and re-audits the exact media before export. It is not access control; files can still be copied outside this workflow. Obtain publication permission separately.
 
-Limits remain explicit: 1–16 selected plans, at most 100 combined masks, source
-at most 64 MiB and 1,800 frames. Exceeding bounds fails rather than dropping masks.
-New artifacts use POSIX 0700/0600 permissions, no existing destination is replaced,
-and failed writes may leave private incomplete output which will not verify.
-No automatic tracking, unknown-text detection, arbitrary-length processing,
-Windows ACL assurance or privacy certification is added.
+The original inspect/render/verify/frame commands return 0 for operation completion and 2 for invalid input or operational failure. Other commands have their own documented failure semantics. **Exit 0 is never permission to publish.**
 
-### Media subprocess safety update
+## Workflow guides
 
-Legacy rendering and frame auditing now bound both pipe streams while running,
-with cancellation-safe direct-child ownership and POSIX process-group cleanup.
-See [process limits and Windows boundaries](docs/PROCESS_LIMITS.md). Windows legacy
-media paths remain available, but native Windows QA and descendant-tree termination
-are not claimed. Signal-managed cancellation requires the main thread; no decoder sandbox is implied.
+- [Selected-frame, explicit-word OCR](docs/OCR_CANDIDATES.md): generate candidates and require human decisions.
+- [Region OCR and coverage](docs/REGION_OCR.md): crop/resize evidence, optional raw control, bounded frame intervals and visible sampling gaps.
+- [Resumable batch OCR](docs/BATCH_OCR.md): explicit source/config binding and completed/pending chunks, retaining the source limits above.
+- [Selective audio](docs/SELECTIVE_AUDIO.md): manual sample intervals, normalized PCM preservation and combined-media verification.
+- [Human review](docs/HUMAN_REVIEW.md): exact decision categories, segment bounds and guarded export.
+- [Staged publication](docs/STAGED_PUBLICATION.md): silent-render no-replace output and complete-stage retry.
+- [Process limits](docs/PROCESS_LIMITS.md): bounded subprocess output, deadlines, cancellation and Windows limitations.
 
-## Optional staged publication for silent renders
+To compose already-reviewed **region OCR** plans, write a selection JSON containing `scan` and `plan` directory pairs, then use:
 
-`render ... --staged` prepares and verifies a complete private sibling bundle
-before no-replace publication. `publish-render STAGED_BUNDLE --out FINAL` retries
-a complete stage without rendering again. Partial stages are retained and require
-fresh rendering; nothing is recursively cleaned up. **Default output commands
-remain nontransactional**, including audio and review export. See
-[staging, platform capabilities and recovery limits](docs/STAGED_PUBLICATION.md).
-This is not power-loss durability, hostile same-account isolation or privacy
-certification. Windows native behavior and ACLs remain untested for this addition.
+```sh
+frame-veil-merge create SOURCE.mp4 selection.json --out combined
+frame-veil-merge verify SOURCE.mp4 selection.json combined
+frame-veil render SOURCE.mp4 combined/plan.json --out redacted
+```
+
+Composition accepts 1–16 plans and at most 100 masks. It checks their source/decision bindings, retains explicit intervals and lists gaps; it does not select all batches for you, infer safe frames or approve privacy.
+
+## Privacy, failures and platform boundaries
+
+- Use only authorized media and trusted, updated local tools. No application API key, telemetry or upload is used. This is **not a decoder or OS sandbox**.
+- Inputs use bounded regular-file reads and strict plan validation. URLs, leaf symlinks, special files and arbitrary FFmpeg expressions are not accepted as source/plan substitutes. Hostile parent-directory replacement and same-account attackers are outside the protection boundary.
+- New media, OCR and review artifacts use POSIX 0700 directories and 0600 files. Existing outputs are never overwritten or silently chmodded. These mode bits do not establish Windows ACL privacy.
+- Output media, OCR images/recognized text, hashes and review records may still be sensitive. Keep them private. Temporary cleanup is not secure erasure.
+- Default final writes are not transactional: interrupted writes may leave partial folders. Verify before use and retry with fresh paths. Silent `render --staged` is a separate opt-in; retained stages require deliberate inspection and cleanup, even after success. It does not cover audio or review export.
+- Staged publication supports a no-replace operation on supported Linux filesystems and a Windows path; other platforms reject that optional mode. Windows native behavior has not been validated. Legacy media functionality is not globally disabled on Windows.
+- Media subprocesses have deadlines and bounded pipe capture. Cancellation cleanup and descendant handling vary by platform; Windows direct-child handling is not complete process-tree termination. Limits do not bound decoder memory or guarantee cleanup after SIGKILL, power loss or uninterruptible OS calls.
+
+## Validation and comparison
+
+The latest recorded public-source regression for commit `a87372409dfaa58d3eea0607c9ef1a3c45fd8ed6` was **175 tests passed, zero skips**, on Linux with synthetic media. This README reorganization does not constitute a new test run. Historical runs used Python 3.12, FFmpeg/ffprobe 7.1.5 and, for OCR, Tesseract 5.5.0/English; they do not establish a wider supported tool-version matrix.
+
+Coverage includes real synthetic decoding/rendering, mask/sample checks, strict evidence validation, OCR decisions, batch interruption/recovery, plan composition, private output creation, process cancellation and staged-publication failures/races. Cross-device failure injection is not a real mounted cross-device test.
+
+No current Windows/macOS native, Windows ACL, real private classroom, Chinese OCR, full-video detection or accepted interactive GUI validation is claimed. No new hosted-CI claim is made. Distribution metadata is currently `0.8.0`; the core module identifier remains `0.7.1`. These existing identifiers describe different surfaces and were not changed by this documentation edit; neither is evidence of a registry release.
+
+[OpenScrub](https://github.com/austinmabry/OpenScrub) offers a broader visual review workflow; [simple-redact-video-tool](https://github.com/cclawton/simple-redact-video-tool) focuses on visual region/time editing; [deface](https://github.com/ORB-HD/deface) focuses on face anonymization. Consult their current documentation for scope. Frame Veil does not claim superior detection, usability, speed or privacy guarantees. Its narrower deliverable is explicit frame/sample plans, inspectable evidence and deterministic checks around human review.
+
+MIT licensed. Public maintainer identity: **walker512**.
