@@ -158,3 +158,13 @@ with broader permissions: keep those in an owner-only directory and review their
 permissions before reuse. These are POSIX mode guarantees, not Windows ACL,
 hostile-parent-directory, administrator-access or complete-video privacy guarantees.
 Other manual render/audio/review output permissions are outside this narrow fix.
+
+## Resumable multi-batch evidence collection (0.7.0)
+
+The [batch workflow](docs/BATCH_OCR.md) can scan an explicit interval in bounded,
+resumable chunks, with read-only disk estimates, source/config binding, verified
+completed/pending ranges and process-interruption recovery. It crosses the
+single-scan 24-frame limit but **retains the source limits of 64 MiB / 1,800
+frames**. It is evidence collection, not automatic mask merging or unrestricted
+long-video redaction. Each run is explicitly bounded and human review remains
+required.
