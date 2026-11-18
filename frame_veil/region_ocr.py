@@ -1,7 +1,7 @@
 """Explicit-region OCR evidence. Trusted local tools, not a privacy clearance."""
 import argparse, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
-from . import core, ocr
+from . import core, ocr, cancellation
 Invalid = core.Invalid
 MAX_CALLS = 64
 MAX_DERIVED = 64 * 1024 * 1024
@@ -54,6 +54,7 @@ def paired_regions(raw):
     # Respect existing evidence/resource bounds; never drop variants to fit.
     return regions(core.canonical(result))
 
+@cancellation.cancellable
 def scan_paired(source, terms_path, frames_path, regions_path, out):
     expanded = paired_regions(core.read(regions_path))
     # Fail before spawning media tools when the expanded execution bound fails.
@@ -65,6 +66,7 @@ def scan_paired(source, terms_path, frames_path, regions_path, out):
         ocr.private_write(config, core.canonical(expanded))
         return scan(source, terms_path, frames_path, config, out)
 
+@cancellation.cancellable
 def scan_interval(source, terms_path, start, end, regions_path, out, pair_unthresholded=False):
     indexes = ocr.interval_indices(start, end)
     rs = paired_regions(core.read(regions_path)) if pair_unthresholded else regions(core.read(regions_path))
@@ -188,6 +190,7 @@ def publish(files, out):
     for n, raw in files.items():
         ocr.private_write(root / n, raw)
 
+@cancellation.cancellable
 def scan(source, terms_path, frames_path, regions_path, out):
     if Path(out).exists() or Path(out).is_symlink(): raise Invalid('Output must be new.')
     rr = core.read(regions_path); rs = regions(rr); ix = ocr.indices(core.read(frames_path))

@@ -2,7 +2,7 @@
 import argparse,csv,hashlib,io,json,os,re,selectors,signal,subprocess,sys,tempfile,time
 from decimal import Decimal,InvalidOperation
 from pathlib import Path
-from . import core
+from . import core, cancellation
 Invalid=core.Invalid
 MAX_SAMPLES=64*1024*1024
 TSV_LIMIT=1024*1024
@@ -13,38 +13,47 @@ def private_write(path, raw):
     """Create a new owner-only artifact without an initially public chmod window."""
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600)
     with os.fdopen(fd,'wb') as f:f.write(raw)
+@cancellation.cancellable
 def bounded_tool(tool,args,cap,timeout=30,sink=None,strict_stderr=False):
     if os.name!='posix':raise Invalid('OCR subprocess workflow requires POSIX.')
     stdout=bytearray();stderr=bytearray();count=0;deadline=time.monotonic()+timeout
-    try:p=subprocess.Popen([core.executable(tool),*args],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,env={'PATH':os.defpath,'LANG':'C.UTF-8','OMP_THREAD_LIMIT':'1'})
-    except OSError:raise Invalid('Required local OCR/media tool could not start.') from None
+    p=None
     def kill():
+        if p is None:return
         try:os.killpg(p.pid,signal.SIGKILL)
         except ProcessLookupError:pass
-    try:
-        with selectors.DefaultSelector() as sel:
-            for f,label in ((p.stdout,'out'),(p.stderr,'err')):os.set_blocking(f.fileno(),False);sel.register(f,selectors.EVENT_READ,label)
-            while sel.get_map() or p.poll() is None:
-                if time.monotonic()>deadline:raise Invalid('OCR/media tool deadline exceeded.')
-                if p.poll() is not None:kill()
-                for k,_ in sel.select(.05):
-                    chunk=os.read(k.fileobj.fileno(),65536)
-                    if not chunk:sel.unregister(k.fileobj);continue
-                    if k.data=='err':
-                        if len(stderr)+len(chunk)>65536:raise Invalid('Tool diagnostics exceeded bounds.')
-                        stderr.extend(chunk)
-                    else:
-                        count+=len(chunk)
-                        if count>cap:raise Invalid('Tool output exceeded bounds.')
-                        if sink:sink(chunk)
-                        else:stdout.extend(chunk)
-        if p.returncode or (strict_stderr and stderr):raise Invalid('Tool reported processing failure.')
-        return bytes(stdout),{'stderr_bytes':len(stderr),'stderr_sha256':sha(stderr)}
-    except OSError:raise Invalid('Bounded tool processing failed.') from None
-    finally:
-        kill()
-        try:p.wait(timeout=2)
-        finally:p.stdout.close();p.stderr.close()
+    with cancellation.scope() as cancelled:
+        try:
+            # Defer delivery until Popen has returned and the child is owned by this
+            # finally block. Do not block signals in the child process itself.
+            with cancelled.defer():
+                try:p=subprocess.Popen([core.executable(tool),*args],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,env={'PATH':os.defpath,'LANG':'C.UTF-8','OMP_THREAD_LIMIT':'1'})
+                except OSError:raise Invalid('Required local OCR/media tool could not start.') from None
+            with selectors.DefaultSelector() as sel:
+                for f,label in ((p.stdout,'out'),(p.stderr,'err')):os.set_blocking(f.fileno(),False);sel.register(f,selectors.EVENT_READ,label)
+                while sel.get_map() or p.poll() is None:
+                    if time.monotonic()>deadline:raise Invalid('OCR/media tool deadline exceeded.')
+                    if p.poll() is not None:kill()
+                    for k,_ in sel.select(.05):
+                        chunk=os.read(k.fileobj.fileno(),65536)
+                        if not chunk:sel.unregister(k.fileobj);continue
+                        if k.data=='err':
+                            if len(stderr)+len(chunk)>65536:raise Invalid('Tool diagnostics exceeded bounds.')
+                            stderr.extend(chunk)
+                        else:
+                            count+=len(chunk)
+                            if count>cap:raise Invalid('Tool output exceeded bounds.')
+                            if sink:sink(chunk)
+                            else:stdout.extend(chunk)
+            if p.returncode or (strict_stderr and stderr):raise Invalid('Tool reported processing failure.')
+            return bytes(stdout),{'stderr_bytes':len(stderr),'stderr_sha256':sha(stderr)}
+        except OSError:raise Invalid('Bounded tool processing failed.') from None
+        finally:
+            with cancelled.defer():
+                if p is not None:
+                    kill()
+                    try:p.wait(timeout=2)
+                    finally:p.stdout.close();p.stderr.close()
 
 def terms(raw):
     d=core.parse(raw)
@@ -70,6 +79,7 @@ def interval_indices(start, end):
     if not start<end or end-start>24:raise Invalid('Explicit interval must contain 1..24 consecutive frames.')
     return list(range(start,end))
 
+@cancellation.cancellable
 def scan_interval(source,terms_path,start,end,out):
     indexes=interval_indices(start,end)
     with tempfile.TemporaryDirectory(prefix='frame-interval-') as td:
@@ -138,6 +148,7 @@ def candidates(tsv,phrases,frame,w,h):
     return out
 
 def names(i):return f'frame-{i:04d}.ppm',f'frame-{i:04d}.tsv'
+@cancellation.cancellable
 def scan(source,terms_path,frames_path,out):
     if Path(out).exists() or Path(out).is_symlink():raise Invalid('Output must be new.')
     tr=core.read(terms_path);fr=core.read(frames_path);phrases=terms(tr);indexes=indices(fr);src=core.read(source,core.MAX_SOURCE,False)
