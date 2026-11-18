@@ -194,3 +194,57 @@ tool-created scratch media permissions, preserve the parent umask, and refuse
 existing/symlink review output leaves. Existing decoded-pixel/sample audits and
 all OCR cancellation/resume regressions remain passing. No real private media was
 used; no Windows ACL or broader security certification is claimed.
+
+## Compose reviewed batch plans (0.8.0)
+
+Finishing a batch scan is not the same as producing a complete redacted video.
+Use the new explicit composition step when you have several **region OCR** plans
+already created from accepted/dismissed human decisions. It revalidates the scan
+artifacts, binds each plan to the exact source hash, and reconstructs each plan
+and receipt from its decisions before combining the masks. It never accepts a
+pending decision or auto-extends a rectangle/time interval. Overlapping masks
+are kept in input order, not silently deduplicated or geometrically merged.
+
+Create a local `selection.json` listing the scan and corresponding reviewed plan
+directories. Relative paths resolve from the selection file's directory:
+
+```json
+[
+  {"scan":"batch/chunks/chunk-0000","plan":"reviewed-plan-0000"},
+  {"scan":"batch/chunks/chunk-0003","plan":"reviewed-plan-0003"}
+]
+```
+
+```sh
+python -m frame_veil.merge_plans create source.mp4 selection.json --out combined
+python -m frame_veil.merge_plans verify source.mp4 selection.json combined
+python -m frame_veil render source.mp4 combined/plan.json --out redacted
+python -m frame_veil audit-masks redacted
+```
+
+Then use the existing human-review workflow to watch the complete output before
+sharing. The command does not automatically run rendering or approve the result.
+Installed users can also invoke `frame-veil-merge`.
+
+The combined directory contains the render-compatible `plan.json`, exact copies
+of selected plans/decisions/receipts, and `merge-receipt.json`. The receipt lists
+input hashes, source binding, mask index ranges, frames not observed by the
+**selected scans**, and frames without any declared mask. Ranges are zero-based,
+start-inclusive/end-exclusive. A missing-range list is not a list of sensitive
+frames, and an empty list is not a privacy clearance. Observing one region or one
+term does not establish the safety of the rest of a frame.
+
+You explicitly choose the inputs: the command cannot infer that every batch was
+included. A scan with no accepted candidates has no mask plan and is not silently
+counted as safe. All selected candidates must have explicit accept/dismiss
+records, but that does not prove a human actually viewed them. Composition
+verification needs the source and selected scan/plan directories; it rereads and
+validates artifacts without rerunning OCR or authenticating historical execution.
+Keep those local inputs if you need to reproduce the check.
+
+Limits remain explicit: 1–16 selected plans, at most 100 combined masks, source
+at most 64 MiB and 1,800 frames. Exceeding bounds fails rather than dropping masks.
+New artifacts use POSIX 0700/0600 permissions, no existing destination is replaced,
+and failed writes may leave private incomplete output which will not verify.
+No automatic tracking, unknown-text detection, arbitrary-length processing,
+Windows ACL assurance or privacy certification is added.
