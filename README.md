@@ -157,7 +157,7 @@ also use owner-only file creation. This does not fix copies previously generated
 with broader permissions: keep those in an owner-only directory and review their
 permissions before reuse. These are POSIX mode guarantees, not Windows ACL,
 hostile-parent-directory, administrator-access or complete-video privacy guarantees.
-Other manual render/audio/review output permissions are outside this narrow fix.
+That 0.4.1 change covered OCR only. The 0.7.1 hardening below also covers manual media and human-review outputs.
 
 ## Resumable multi-batch evidence collection (0.7.0)
 
@@ -168,3 +168,29 @@ single-scan 24-frame limit but **retains the source limits of 64 MiB / 1,800
 frames**. It is evidence collection, not automatic mask merging or unrestricted
 long-video redaction. Each run is explicitly bounded and human review remains
 required.
+
+## Private media and human-review outputs (0.7.1)
+
+Manual render bundles, PNG previews, selective-audio bundles (including nested
+video, WAV and combined MKV), human review/decision JSON and reviewed exports now
+use owner-only POSIX directories (0700) and files (0600) from creation. They share
+the same exclusive private-file writer as OCR. Audio publication copies only the
+known bounded file set with private creation, rather than relying on permissions
+being corrected after a directory tree copy. FFmpeg/ffprobe launched through the
+manual media runner get a child-only umask 077, so their scratch output files are
+also private without changing the parent process's umask.
+
+Existing input/output permissions are not automatically changed, and existing
+output leaves are not overwritten. Previously created copies may still have
+broader permissions: review them locally before reuse or sharing. This is a POSIX
+access-mode improvement, not Windows ACL validation, encryption, secure erasure,
+protection from administrators/hostile parent directories, or proof that the
+recording is free of unmarked private content. Even a reviewed export remains
+private by default and is not publication authorization.
+
+Local 0.7.1 validation: 140 tests passed, zero skips. Three new tests exercise
+real render/preview/audio/review/export outputs under umask 022 and 000, check
+tool-created scratch media permissions, preserve the parent umask, and refuse
+existing/symlink review output leaves. Existing decoded-pixel/sample audits and
+all OCR cancellation/resume regressions remain passing. No real private media was
+used; no Windows ACL or broader security certification is claimed.
