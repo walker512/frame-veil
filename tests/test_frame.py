@@ -47,12 +47,14 @@ class Validation(unittest.TestCase):
             r=subprocess.run([sys.executable,'-m','frame_veil','inspect',str(p)],cwd=ROOT,capture_output=True,text=True,timeout=2)
             self.assertEqual(r.returncode,2);self.assertNotIn('PRIVATE_SENTINEL',r.stderr);self.assertNotIn('Traceback',r.stderr)
     def test_media_timeout_and_error_sanitized(self):
-        with patch('frame_veil.core.subprocess.run',side_effect=subprocess.TimeoutExpired('PRIVATE',1)):
-            with self.assertRaises(Invalid) as e:run('ffmpeg',[])
+        from frame_veil import core
+        with patch.object(core,'executable',return_value=sys.executable),patch.object(core,'TIMEOUT',.05):
+            with self.assertRaises(Invalid) as e:run('synthetic',['-c','import time;time.sleep(5)'])
             self.assertNotIn('PRIVATE',str(e.exception))
-        for returncode,stderr in [(1,b'PRIVATE'),(0,b'PRIVATE')]:
-            with patch('frame_veil.core.subprocess.run',return_value=subprocess.CompletedProcess([],returncode,b'',stderr)):
-                with self.assertRaises(Invalid):run('ffmpeg',[])
+        for code in ['import sys;sys.exit(1)', 'import sys;sys.stderr.write("PRIVATE")']:
+            with patch.object(core,'executable',return_value=sys.executable):
+                with self.assertRaises(Invalid) as e:run('synthetic',['-c',code])
+                self.assertNotIn('PRIVATE',str(e.exception))
     def test_input_protocol_and_external_reference_guards(self):
         opts=input_options('mov');self.assertEqual(opts[opts.index('-protocol_whitelist')+1],'file,pipe');self.assertEqual(opts[opts.index('-enable_drefs')+1],'0');self.assertEqual(opts[opts.index('-use_absolute_path')+1],'0')
     def test_probe_rejects_rotation_and_bad_dimensions(self):

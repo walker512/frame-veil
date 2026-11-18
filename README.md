@@ -248,3 +248,11 @@ New artifacts use POSIX 0700/0600 permissions, no existing destination is replac
 and failed writes may leave private incomplete output which will not verify.
 No automatic tracking, unknown-text detection, arbitrary-length processing,
 Windows ACL assurance or privacy certification is added.
+
+### Media subprocess safety update
+
+Legacy rendering and frame auditing now bound both pipe streams while running,
+with cancellation-safe direct-child ownership and POSIX process-group cleanup.
+See [process limits and Windows boundaries](docs/PROCESS_LIMITS.md). Windows legacy
+media paths remain available, but native Windows QA and descendant-tree termination
+are not claimed. Signal-managed cancellation requires the main thread; no decoder sandbox is implied.

@@ -70,11 +70,8 @@ def executable(name):
     return path
 
 def run(name,args,limit=2*1024*1024):
-    try:
-        p=subprocess.run([executable(name),*args],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=TIMEOUT,check=False,**({'umask':0o077} if os.name=='posix' else {}))
-    except (OSError,subprocess.TimeoutExpired):raise Invalid('Media tool failed or timed out.') from None
-    if p.returncode or p.stderr or len(p.stdout)>limit:raise Invalid('Media processing failed or output exceeded bounds.')
-    return p.stdout
+    from .process import bounded_run
+    return bounded_run([executable(name),*args],limit,TIMEOUT)
 
 # MOV external references are disabled. Network protocols and playlist formats
 # are not accepted. A recent trusted FFmpeg installation is still required.
@@ -204,34 +201,40 @@ def audit_masks(folder):
     info=checked['output'];plan=load_plan(plan_raw,info);frame_bytes=info['width']*info['height']*3;pixel_checks=0;marked_frames=0
     with tempfile.TemporaryDirectory(prefix='frame-veil-audit-') as t:
         p=Path(t)/'verified.mkv';private_write(p,video_raw)
-        # One RGB frame at a time, not the full decoded recording in memory.
-        with tempfile.TemporaryFile() as errors:
-            process=None;timer=None;expired=threading.Event()
-            try:
-                process=subprocess.Popen([executable('ffmpeg'),'-hide_banner','-loglevel','error','-nostdin',*input_options('matroska'),'-i',str(p),'-map','0:v:0','-an','-sn','-dn','-threads','1','-fps_mode','passthrough','-frames:v',str(info['frames']+1),'-pix_fmt','rgb24','-f','rawvideo','pipe:1'],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=errors)
-                def stop():
-                    expired.set()
-                    try:process.kill()
-                    except OSError:pass
-                timer=threading.Timer(TIMEOUT,stop);timer.daemon=True;timer.start()
-                for index in range(info['frames']):
-                    frame=process.stdout.read(frame_bytes)
-                    if expired.is_set() or len(frame)!=frame_bytes:raise Invalid('Incomplete or timed-out RGB decode.')
-                    masks=[(mi,m) for mi,m in enumerate(plan['masks']) if m['start_frame']<=index<m['end_frame']]
-                    if masks:marked_frames+=1
-                    for mi,m in masks:
-                        for row in range(m['y'],m['y']+m['height']):
-                            start=(row*info['width']+m['x'])*3;segment=frame[start:start+m['width']*3]
-                            if segment.count(0)!=len(segment):raise MaskMismatch(index,mi,row)
-                        pixel_checks+=m['width']*m['height']
-                if process.stdout.read(1):raise Invalid('Unexpected extra decoded frames.')
-                code=process.wait(timeout=2);errors.seek(0)
-                if expired.is_set() or code or errors.read(1):raise Invalid('Decode reported an error or timeout.')
-            except (OSError,subprocess.TimeoutExpired):raise Invalid('Mask audit decoder failed or timed out.') from None
-            finally:
-                if timer is not None:timer.cancel()
-                if process is not None:
-                    if process.poll() is None:
-                        process.kill();process.wait()
-                    if process.stdout is not None:process.stdout.close()
+        from .process import bounded_run
+        pending=bytearray();index=0
+        def consume(chunk):
+            nonlocal index,pixel_checks,marked_frames
+            pending.extend(chunk)
+            while len(pending)>=frame_bytes:
+                frame=bytes(pending[:frame_bytes]);del pending[:frame_bytes]
+                masks=[(mi,m) for mi,m in enumerate(plan['masks']) if m['start_frame']<=index<m['end_frame']]
+                if masks:marked_frames+=1
+                for mi,m in masks:
+                    for row in range(m['y'],m['y']+m['height']):
+                        start=(row*info['width']+m['x'])*3;segment=frame[start:start+m['width']*3]
+                        if segment.count(0)!=len(segment):raise MaskMismatch(index,mi,row)
+                    pixel_checks+=m['width']*m['height']
+                index+=1
+        bounded_run([executable('ffmpeg'),'-hide_banner','-loglevel','error','-nostdin',*input_options('matroska'),'-i',str(p),'-map','0:v:0','-an','-sn','-dn','-threads','1','-fps_mode','passthrough','-frames:v',str(info['frames']+1),'-pix_fmt','rgb24','-f','rawvideo','pipe:1'],frame_bytes*info['frames'],TIMEOUT,sink=consume)
+        if pending or index!=info['frames']:raise Invalid('Incomplete RGB decode.')
     return {'declared_masks_opaque':True,'all_audio_absent':True,'decoded_frames':info['frames'],'marked_frames':marked_frames,'rectangle_pixel_checks_including_overlap':pixel_checks,'output_sha256':checked['output_sha256'],'plan_sha256':checked['plan_sha256'],'manual_review_required':True,'scope':'Exact zero RGB checks of declared output rectangles only; unmarked privacy, source authenticity, source-to-output preservation and timing correctness are not certified.'}
+
+# Keep cancellation protection alive through temporary-directory cleanup, not
+# only while the child process is active. Imports are lazy to avoid the core /
+# cancellation error-type dependency cycle.
+def _cancellable_media(function):
+    import functools
+    @functools.wraps(function)
+    def wrapped(*args,**kwargs):
+        from .cancellation import scope
+        import threading
+        if threading.current_thread() is not threading.main_thread():return function(*args,**kwargs)
+        with scope():return function(*args,**kwargs)
+    return wrapped
+
+inspect=_cancellable_media(inspect)
+render=_cancellable_media(render)
+verify=_cancellable_media(verify)
+frame=_cancellable_media(frame)
+audit_masks=_cancellable_media(audit_masks)
