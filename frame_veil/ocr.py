@@ -9,10 +9,7 @@ TSV_LIMIT=1024*1024
 SCOPE='Selected-frame text candidates only. Not complete privacy detection, proof of viewing or publication consent.'
 def sha(b):return hashlib.sha256(b).hexdigest()
 def dump(d):return core.canonical(d)
-def private_write(path, raw):
-    """Create a new owner-only artifact without an initially public chmod window."""
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600)
-    with os.fdopen(fd,'wb') as f:f.write(raw)
+private_write=core.private_write
 @cancellation.cancellable
 def bounded_tool(tool,args,cap,timeout=30,sink=None,strict_stderr=False):
     if os.name!='posix':raise Invalid('OCR subprocess workflow requires POSIX.')

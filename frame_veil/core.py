@@ -10,6 +10,11 @@ class MaskMismatch(Invalid):
         self.location={'frame_index':frame,'mask_index':mask,'pixel_row':row}
 
 
+def private_write(path,raw):
+    """Create owner-only evidence from the first write; never overwrite a leaf."""
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,'O_BINARY',0),0o600)
+    with os.fdopen(fd,'wb') as f:f.write(raw)
+
 def read(path,limit=INPUT_LIMIT,utf8=True):
     try:
         if not stat.S_ISREG(Path(path).lstat().st_mode):raise Invalid('Regular non-symlink file required.')
@@ -66,7 +71,7 @@ def executable(name):
 
 def run(name,args,limit=2*1024*1024):
     try:
-        p=subprocess.run([executable(name),*args],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=TIMEOUT,check=False)
+        p=subprocess.run([executable(name),*args],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=TIMEOUT,check=False,**({'umask':0o077} if os.name=='posix' else {}))
     except (OSError,subprocess.TimeoutExpired):raise Invalid('Media tool failed or timed out.') from None
     if p.returncode or p.stderr or len(p.stdout)>limit:raise Invalid('Media processing failed or output exceeded bounds.')
     return p.stdout
@@ -105,7 +110,7 @@ def validate_stream_types(types):
 def snapshot(source,dest):
     # Bound/read a leaf regular file once, then every media process consumes this
     # private snapshot rather than reopening a user-controlled source path.
-    raw=read(source,MAX_SOURCE,utf8=False);dest.write_bytes(raw);return hashlib.sha256(raw).hexdigest()
+    raw=read(source,MAX_SOURCE,utf8=False);private_write(dest,raw);return hashlib.sha256(raw).hexdigest()
 
 def load_plan(raw,info):
     d=parse(raw);fields(d,['schema','source_sha256','width','height','frames','masks']);integer(d['schema'],1,1)
@@ -145,8 +150,8 @@ def render(source,plan_path,out):
         output_raw=read(video,MAX_OUTPUT,utf8=False)
         report={'schema':1,'source_sha256':sha,'plan_sha256':hashlib.sha256(plan_raw).hexdigest(),'output_sha256':hashlib.sha256(output_raw).hexdigest(),'input':info,'output':rendered,'source_stream_types':types,'all_audio_removed':True,'source_metadata_not_copied':True,'manual_review_required':True,'scope':'Only explicit opaque rectangles on specified decoded frames were applied. No automatic privacy detection, source authenticity or anonymization certification.'}
         files={'redacted.mkv':output_raw,'plan.json':plan_raw,'receipt.json':canonical(report)}
-        root=Path(out);root.mkdir(exist_ok=False)
-        for name,data in files.items():(root/name).write_bytes(data)
+        root=Path(out);root.mkdir(mode=0o700,exist_ok=False)
+        for name,data in files.items():private_write(root/name,data)
     return report
 
 def verify(folder):
@@ -169,7 +174,7 @@ def verify(folder):
     plan_raw=read(root/'plan.json');video_raw=read(root/'redacted.mkv',MAX_OUTPUT,utf8=False)
     if receipt['plan_sha256']!=hashlib.sha256(plan_raw).hexdigest() or receipt['output_sha256']!=hashlib.sha256(video_raw).hexdigest():raise Invalid('Output bytes differ from receipt.')
     with tempfile.TemporaryDirectory(prefix='frame-veil-') as t:
-        p=Path(t)/'video.mkv';p.write_bytes(video_raw);info=probe(p,'matroska');types=stream_types(p,'matroska')
+        p=Path(t)/'video.mkv';private_write(p,video_raw);info=probe(p,'matroska');types=stream_types(p,'matroska')
     if canonical(info)!=canonical(receipt['output']) or types!=['video']:raise Invalid('Output metadata/streams differ.')
     plan=load_plan(plan_raw,info)
     if plan['source_sha256']!=receipt['source_sha256'] or receipt['all_audio_removed'] is not True or receipt['manual_review_required'] is not True:raise Invalid('Receipt assertions differ.')
@@ -180,10 +185,10 @@ def frame(folder,index,out):
     raw=read(Path(folder)/'redacted.mkv',MAX_OUTPUT,utf8=False)
     if hashlib.sha256(raw).hexdigest()!=result['output_sha256']:raise Invalid('Video changed after verification.')
     with tempfile.TemporaryDirectory(prefix='frame-veil-') as t:
-        p=Path(t)/'video.mkv';p.write_bytes(raw)
+        p=Path(t)/'video.mkv';private_write(p,raw)
         png=run('ffmpeg',['-hide_banner','-loglevel','error','-nostdin',*input_options('matroska'),'-i',str(p),'-map','0:v:0','-vf',f"select=eq(n\\,{index})",'-frames:v','1','-f','image2pipe','-c:v','png','pipe:1'],limit=16*1024*1024)
         if not png.startswith(b'\x89PNG\r\n\x1a\n'):raise Invalid('Review frame could not be decoded.')
-    root=Path(out);root.mkdir(exist_ok=False);(root/'review-frame.png').write_bytes(png)
+    root=Path(out);root.mkdir(mode=0o700,exist_ok=False);private_write(root/'review-frame.png',png)
     return {'frame':index,'manual_review_required':True}
 
 
@@ -198,7 +203,7 @@ def audit_masks(folder):
     if hashlib.sha256(plan_raw).hexdigest()!=checked['plan_sha256'] or hashlib.sha256(video_raw).hexdigest()!=checked['output_sha256']:raise Invalid('Bundle changed after structural verification.')
     info=checked['output'];plan=load_plan(plan_raw,info);frame_bytes=info['width']*info['height']*3;pixel_checks=0;marked_frames=0
     with tempfile.TemporaryDirectory(prefix='frame-veil-audit-') as t:
-        p=Path(t)/'verified.mkv';p.write_bytes(video_raw)
+        p=Path(t)/'verified.mkv';private_write(p,video_raw)
         # One RGB frame at a time, not the full decoded recording in memory.
         with tempfile.TemporaryFile() as errors:
             process=None;timer=None;expired=threading.Event()

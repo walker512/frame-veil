@@ -13,7 +13,7 @@ def _snapshot(folder,dest,kind):
         root=Path(folder)
         if root.is_symlink() or not root.is_dir() or {p.name for p in root.iterdir()}!={'redacted.mkv','plan.json','receipt.json'}:raise core.Invalid('Unexpected review bundle.')
         for name,limit in [('redacted.mkv',core.MAX_OUTPUT),('plan.json',core.INPUT_LIMIT),('receipt.json',core.INPUT_LIMIT)]:
-            (dest/name).write_bytes(core.read(root/name,limit,False))
+            core.private_write(dest/name,core.read(root/name,limit,False))
         result=core.audit_masks(dest);media='redacted.mkv';frames=core.parse(core.read(dest/'receipt.json'))['output']['frames'];a=None
     else:raise core.Invalid('Unknown review kind.')
     # Bind every expected bundle file, not only the playable media.
@@ -42,7 +42,7 @@ def _load(raw,expected):
 def _write(path,value):
     raw=core.canonical(value)
     if len(raw)>core.INPUT_LIMIT:raise core.Invalid('Review record exceeds bound.')
-    with Path(path).open('xb') as f:f.write(raw)
+    core.private_write(path,raw)
 
 def prepare(folder,kind,out):
     with tempfile.TemporaryDirectory(prefix='frame-review-') as t:
@@ -69,7 +69,7 @@ def export(folder,record,out,acknowledge=False):
         if any(v!='reviewed' for i in value['items'] for v in i['checks'].values()):raise core.Invalid('Pending or blocked review checks remain.')
         # Snapshot was audited and bound; export that exact snapshot, not a reread.
         payload=core.read(media,core.MAX_OUTPUT,False);record_bytes=core.canonical(value)
-        dest=Path(out);dest.mkdir(exist_ok=False)
-        (dest/'reviewed.mkv').write_bytes(payload);(dest/'human-review.json').write_bytes(record_bytes)
-        (dest/'SCOPE.txt').write_bytes((SCOPE+'\nDo not share until you independently have all necessary permissions.\n').encode())
+        dest=Path(out);dest.mkdir(mode=0o700,exist_ok=False)
+        core.private_write(dest/'reviewed.mkv',payload);core.private_write(dest/'human-review.json',record_bytes)
+        core.private_write(dest/'SCOPE.txt',(SCOPE+'\nDo not share until you independently have all necessary permissions.\n').encode())
     return {'exported':True,'media_sha256':_hash(payload),'human_declarations_complete':True,'privacy_certified':False,'publication_authorized':False,'scope':SCOPE}

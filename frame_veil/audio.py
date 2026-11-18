@@ -78,11 +78,15 @@ def _snapshot_bundle(folder,temp):
     if root.is_symlink() or not root.is_dir() or {p.name for p in root.iterdir()}!=names:raise core.Invalid('Unexpected audio bundle structure.')
     video=root/'video'
     if video.is_symlink() or not video.is_dir() or {p.name for p in video.iterdir()}!={'redacted.mkv','plan.json','receipt.json'}:raise core.Invalid('Unexpected nested video bundle.')
-    (temp/'video').mkdir()
+    _copy_files(root,temp)
+
+def _copy_files(root,temp):
+    video=root/'video'
+    (temp/'video').mkdir(mode=0o700)
     for name,limit in [('audio-plan.json',core.INPUT_LIMIT),('redacted.wav',MAX_PCM+1024),('review.mkv',core.MAX_OUTPUT),('receipt.json',core.INPUT_LIMIT)]:
-        (temp/name).write_bytes(core.read(root/name,limit,utf8=False))
+        core.private_write(temp/name,core.read(root/name,limit,utf8=False))
     for name,limit in [('redacted.mkv',core.MAX_OUTPUT),('plan.json',core.INPUT_LIMIT),('receipt.json',core.INPUT_LIMIT)]:
-        (temp/'video'/name).write_bytes(core.read(video/name,limit,utf8=False))
+        core.private_write(temp/'video'/name,core.read(video/name,limit,utf8=False))
 
 def _check(temp):
     base=core.verify(temp/'video');r=core.parse(core.read(temp/'receipt.json'))
@@ -109,13 +113,13 @@ def render_audio(source,video_plan,audio_plan,out):
     audio_raw=core.read(audio_plan)
     with tempfile.TemporaryDirectory(prefix='frame-veil-audio-') as t:
         temp=Path(t);src,source_sha,_,a,pcm=_source(source,temp);plan=load_audio_plan(audio_raw,source_sha,a)
-        bundle=temp/'bundle';bundle.mkdir();core.render(src,video_plan,bundle/'video')
+        bundle=temp/'bundle';bundle.mkdir(mode=0o700);core.render(src,video_plan,bundle/'video')
         muted=bytearray(pcm);width=a['channels']*2
         for interval in plan['mute_ranges']:muted[interval['start_sample']*width:interval['end_sample']*width]=bytes((interval['end_sample']-interval['start_sample'])*width)
-        wav=_wav(muted,a);(bundle/'redacted.wav').write_bytes(wav);(bundle/'audio-plan.json').write_bytes(audio_raw)
+        wav=_wav(muted,a);core.private_write(bundle/'redacted.wav',wav);core.private_write(bundle/'audio-plan.json',audio_raw)
         core.run('ffmpeg',['-hide_banner','-loglevel','error','-nostdin','-n',*core.input_options('matroska'),'-i',str(bundle/'video'/'redacted.mkv'),*core.input_options('wav'),'-i',str(bundle/'redacted.wav'),'-map','0:v:0','-map','1:a:0','-sn','-dn','-map_metadata','-1','-map_metadata:s','-1','-map_chapters','-1','-c:v','copy','-c:a','pcm_s16le','-threads','1','-fs',str(core.MAX_OUTPUT),'-f','matroska',str(bundle/'review.mkv')])
-        params={k:a[k] for k in ('sample_rate','channels','samples')};r={'schema':1,'source_sha256':source_sha,'video_output_sha256':sha(core.read(bundle/'video'/'redacted.mkv',core.MAX_OUTPUT,utf8=False)),'audio_plan_sha256':sha(audio_raw),'wav_sha256':sha(wav),'review_sha256':sha(core.read(bundle/'review.mkv',core.MAX_OUTPUT,utf8=False)),'audio':params,'manual_review_required':True,'scope':'Manual sample muting; no automatic privacy detection or publication authorization.'};(bundle/'receipt.json').write_bytes(core.canonical(r));_check(bundle)
-        shutil.copytree(bundle,out,ignore=shutil.ignore_patterns('combined.pcm'))
+        params={k:a[k] for k in ('sample_rate','channels','samples')};r={'schema':1,'source_sha256':source_sha,'video_output_sha256':sha(core.read(bundle/'video'/'redacted.mkv',core.MAX_OUTPUT,utf8=False)),'audio_plan_sha256':sha(audio_raw),'wav_sha256':sha(wav),'review_sha256':sha(core.read(bundle/'review.mkv',core.MAX_OUTPUT,utf8=False)),'audio':params,'manual_review_required':True,'scope':'Manual sample muting; no automatic privacy detection or publication authorization.'};core.private_write(bundle/'receipt.json',core.canonical(r));_check(bundle)
+        destination=Path(out);destination.mkdir(mode=0o700,exist_ok=False);_copy_files(bundle,destination)
         return {'rendered':True,'audio':params,'all_audio_removed':False,'manual_review_required':True}
 
 def verify_audio(folder):
